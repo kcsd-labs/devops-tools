@@ -1,0 +1,54 @@
+auth:
+  bootstrapAdmins:
+    passwordLogin:
+      passwordHash: ""
+      username: admin
+    roles:
+    - platform-admin
+    users:
+    - admin
+  local:
+    users: []
+  provider: local
+  session:
+    ttl: 8h
+cluster:
+  hiddenNamespaces:
+  - kube-*
+  - default
+  inCluster: true
+configurations:
+  consul:
+    address: ""
+    enabled: false
+    prefix: config/
+  git:
+    basePath: ""
+    branch: ""
+    enabled: false
+    project: ""
+    url: ""
+environment: production
+impersonation:
+  defaultGroup: devops-tools-users
+  enabled: false
+logs:
+  lokiURL: ""
+metrics:
+  prometheusURL: ""
+storage:
+  path: /data/devops-tools.json
+ui:
+  brandInitials: ""
+  brandName: ""
+rbac:
+  roles:
+    platform-admin:
+      description: Full access to every namespace
+      global:
+      - user-list
+      - user-manage
+      namespaces:
+      - namespace: '*'
+        operations:
+        - '*'

@@ -1,0 +1,83 @@
+name: Release
+
+# A tag is the release. v0.25.2 publishes the image as 0.25.2 and the chart at
+# whatever version Chart.yaml carries — the two move independently on purpose,
+# so the tag is checked against appVersion rather than assumed to match.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # to create the GitHub release
+
+env:
+  IMAGE: 1kcsd/devops-tools
+  CHART_REGISTRY: oci://registry-1.docker.io/1kcsd
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the versions the chart declares
+        id: v
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app=$(sed -n 's/^appVersion:[[:space:]]*"\?\([^"]*\)"\?[[:space:]]*$/\1/p' charts/devops-tools/Chart.yaml)
+          chart=$(sed -n 's/^version:[[:space:]]*\(.*\)[[:space:]]*$/\1/p' charts/devops-tools/Chart.yaml)
+
+          if [ "$tag" != "$app" ]; then
+            echo "tag $GITHUB_REF_NAME says $tag, Chart.yaml appVersion says $app."
+            echo "The image tag comes from appVersion, so releasing this would publish"
+            echo "a version nobody asked for. Bump one of the two and tag again."
+            exit 1
+          fi
+
+          echo "app=$app"     >> "$GITHUB_OUTPUT"
+          echo "chart=$chart" >> "$GITHUB_OUTPUT"
+          echo "image $IMAGE:$app, chart $chart"
+
+      # Everything is verified before anything is published: a half-done release
+      # is worse than a late one.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./... && go test ./...
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # VERSION is stamped into the binary: a running instance reports it in
+          # the sidebar and in its startup log, and an image built without it
+          # calls itself `dev`.
+          build-args: VERSION=${{ steps.v.outputs.app }}
+          tags: ${{ env.IMAGE }}:${{ steps.v.outputs.app }}
+
+      - uses: azure/setup-helm@v4
+      - name: Package and push the chart
+        run: |
+          helm package charts/devops-tools
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
+            helm registry login registry-1.docker.io -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          helm push "devops-tools-${{ steps.v.outputs.chart }}.tgz" "$CHART_REGISTRY"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP: ${{ steps.v.outputs.app }}
+          CHART: ${{ steps.v.outputs.chart }}
+        run: |
+          printf 'Image: %s:%s\nChart version: %s\n\nInstall:\n\n    helm install devops-tools %s/devops-tools --version %s \\\n      --namespace devops-tools --create-namespace \\\n      --set config.auth.bootstrapAdmins.passwordLogin.password=SOMETHING\n' \
+            "$IMAGE" "$APP" "$CHART" "$CHART_REGISTRY" "$CHART" > notes.md
+          cat notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md

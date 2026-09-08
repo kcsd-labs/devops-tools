@@ -1,0 +1,171 @@
+{{- if and .Values.persistence.enabled (gt (int .Values.replicaCount) 1) }}
+{{- fail "persistence.enabled requires replicaCount: 1 — the access model is a file on a ReadWriteOnce volume, which a second replica cannot mount, and two replicas would overwrite each other's writes. Use an external identity provider and persistence.enabled=false if you need more than one." }}
+{{- end }}
+{{- /*
+Every credential, whether written in values or taken from a Secret of the
+operator's own. The service reads all of them from the environment and from
+nowhere else, which is why they cannot simply stay in the configuration file —
+see templates/configmap.yaml.
+*/ -}}
+{{- $creds := include "devops-tools.credentials" . | fromJson -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devops-tools.fullname" . }}
+  labels: {{- include "devops-tools.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- if .Values.persistence.enabled }}
+  # A ReadWriteOnce volume cannot be mounted by two pods at once, and the
+  # default rolling update starts the new pod before stopping the old one — it
+  # would wait for a volume the outgoing pod still holds, forever. Recreate
+  # costs a few seconds of downtime and actually completes.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels: {{- include "devops-tools.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "devops-tools.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Restart the pods when the configuration changes, so a ConfigMap edit
+        # takes effect even for settings that are only read at startup.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # And when a credential changes. Without this, editing one in
+        # values would update the Secret and change nothing until somebody
+        # restarted the pod by hand — they are read once, at startup.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "devops-tools.serviceAccountName" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: devops-tools
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DEVOPS_TOOLS_CONFIG_DIR
+              value: /config
+            - name: DEVOPS_TOOLS_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.session.existingSecret | default (include "devops-tools.fullname" .) }}
+                  key: sessionKey
+            {{- /*
+            An explicit env entry beats envFrom, so anything written in values
+            wins over the same variable arriving from envFromSecrets. That is
+            the intended order — the more specific statement wins — but it is
+            silent, so do not set both.
+            */}}
+            {{- range $id, $cred := $creds }}
+            {{- if $cred.env }}
+            - name: {{ $cred.env }}
+              valueFrom:
+                secretKeyRef:
+                  {{- if $cred.secretName }}
+                  name: {{ $cred.secretName }}
+                  key: {{ $cred.secretKey }}
+                  {{- else }}
+                  name: {{ include "devops-tools.fullname" $ }}
+                  key: {{ $id }}
+                  {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFromSecrets }}
+          envFrom:
+            {{- range . }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            # Mounted either way: the root filesystem is read-only, so without
+            # somewhere to write the access model the service stops at startup
+            # instead of running without persistence.
+            - name: data
+              mountPath: {{ dir .Values.config.storage.path }}
+            {{- if hasKey $creds "ldapCaCert" }}
+            # The directory's CA, given in values rather than mounted by hand.
+            # configmap.yaml points caFile at this same path.
+            - name: ldap-ca-inline
+              mountPath: {{ include "devops-tools.ldapCADir" . }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "devops-tools.fullname" . }}
+        - name: data
+        {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "devops-tools.fullname" .) }}
+        {{- else }}
+          # No claim: who signed in and what they were granted last only as long
+          # as the pod does. Fine for trying this out, and for an installation
+          # whose access model is seeded from values and never edited — but a
+          # restart puts everyone back to the seeded roles, so say so out loud
+          # before choosing it.
+          emptyDir: {}
+        {{- end }}
+        {{- with (get $creds "ldapCaCert") }}
+        # Named -inline so it cannot collide with a volume of the operator's own
+        # under extraVolumes, which is how this was mounted before the chart
+        # could carry the certificate itself.
+        - name: ldap-ca-inline
+          secret:
+            {{- if .secretName }}
+            secretName: {{ .secretName }}
+            items:
+              - key: {{ .secretKey }}
+                path: ca.crt
+            {{- else }}
+            secretName: {{ include "devops-tools.fullname" $ }}
+            items:
+              - key: ldapCaCert
+                path: ca.crt
+            {{- end }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

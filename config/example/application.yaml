@@ -1,0 +1,230 @@
+# DevOps Tools — example configuration.
+#
+# Every field shown here is optional unless stated otherwise. The defaults are
+# chosen so that a fresh install works with nothing but the `local` provider.
+#
+# Secrets are never read from this file. They come from the environment:
+#   DEVOPS_TOOLS_SESSION_KEY              signing key for session tokens (32+ chars)
+#   DEVOPS_TOOLS_LDAP_BIND_PASSWORD       password of the LDAP service account
+#   DEVOPS_TOOLS_BOOTSTRAP_PASSWORD       password for the break-glass account
+#   DEVOPS_TOOLS_BOOTSTRAP_PASSWORD_HASH  or a bcrypt hash of it, if you prefer
+
+# Free-form label shown in the UI and recorded in the audit log.
+environment: "dev"
+
+# What the interface calls itself — the sidebar, the sign-in screen, the browser
+# tab. A setting rather than a string in the code so an installation can carry
+# its own name; the technical identity stays DevOps Tools regardless.
+ui:
+  brandName: "DevOps Tools"
+  brandInitials: "" # two-letter mark; derived from the name when empty
+
+server:
+  addr: ":8080"
+  # Set only when the UI is served from a different origin than the API.
+  corsOrigin: ""
+
+# ---------------------------------------------------------------------------
+# Authentication. Pick exactly one provider.
+# ---------------------------------------------------------------------------
+auth:
+  provider: local # local | ldap | oidc
+
+  session:
+    # How long a session lasts before the user has to sign in again.
+    # Roles are not carried in the token — they are read on every request —
+    # so granting or revoking access takes effect immediately, regardless of
+    # this value.
+    ttl: 8h
+
+  # --- who can always get in -------------------------------------------------
+  # Roles are assigned in the UI, under Users, and stored on the volume. That
+  # leaves one way to be locked out permanently: a mistake there, or a lost
+  # volume. These users always hold these roles, and nothing in the UI can
+  # change it — only this file can.
+  bootstrapAdmins:
+    users: [admin]
+    roles: [platform-admin]
+    # Credentials for that account, usable whatever the provider is: before
+    # anyone has been granted access, and when the provider is unreachable.
+    #
+    # Setting it puts a username and password form on the sign-in screen, next
+    # to the identity provider, whichever provider is configured.
+    #
+    # A way in that a directory cannot revoke: off unless a password is set,
+    # logged at every start and at every use, rate limited like any other
+    # password form.
+    #
+    # Set DEVOPS_TOOLS_BOOTSTRAP_PASSWORD to the password itself and it is hashed
+    # at startup; the plaintext is never stored. Supply a hash instead, through
+    # passwordHash or DEVOPS_TOOLS_BOOTSTRAP_PASSWORD_HASH, if the value must not
+    # be readable even by whoever can read the Secret. Setting both is refused.
+    #
+    # Never the password in this file: it becomes a ConfigMap.
+    passwordLogin:
+      username: ""
+      passwordHash: ""
+
+  # --- provider: local -------------------------------------------------------
+  # Users defined right here. Good for evaluation, small teams and air-gapped
+  # installations. Generate a hash with:
+  #   docker run --rm <image> devops-tools hash-password 'your-password'
+  local:
+    users:
+      - username: admin
+        email: admin@example.com
+        # bcrypt hash of "admin" — CHANGE THIS BEFORE EXPOSING THE SERVICE
+        passwordHash: "$2a$10$g8J.N1mZm6FUHfQR5FMYButGpMFIZeYtnd4aJd6sp.gXQQ.LQmUDq"
+        # Applies the first time this user signs in and never again: from then
+        # on the roles held in the portal are the only ones that count.
+        roles: [platform-admin]
+
+  # --- provider: ldap --------------------------------------------------------
+  # ldap:
+  #   url: "ldaps://ldap.example.com:636"
+  #   bindDN: "cn=devops-tools,ou=services,dc=example,dc=com"
+  #   userSearchBase: "ou=people,dc=example,dc=com"
+  #   userFilter: "(uid=%s)"            # Active Directory: (sAMAccountName=%s)
+  #   emailAttribute: "mail"
+  #   # Leave the group search empty to read groups from the user's memberOf.
+  #   groupSearchBase: "ou=groups,dc=example,dc=com"
+  #   groupFilter: "(member=%s)"        # %s = user DN, %u = username
+  #   groupNameAttribute: "cn"
+  #   # Groups are read and shown against each user, as the context for deciding
+  #   # what to grant — but they do not grant anything themselves. Someone
+  #   # signing in for the first time appears under Users with no access until
+  #   # an administrator gives them a role.
+  #   #
+  #   # groupMapping and defaultRoles are gone; a config that still sets either
+  #   # is refused at startup rather than quietly granting less than intended.
+  #   tls:
+  #     startTLS: false                 # true when using plain ldap:// on 389
+  #     caFile: ""                      # PEM bundle for a private CA
+  #     insecureSkipVerify: false       # never enable in production
+
+  # --- provider: oidc --------------------------------------------------------
+  # Works with Keycloak, Dex, Okta, Authentik and anything else speaking OIDC.
+  # If you already have an identity provider, this is the recommended option —
+  # it also covers LDAP, since most providers can federate a directory.
+  # oidc:
+  #   issuerURL: "https://keycloak.example.com/realms/main"
+  #   clientID: "devops-tools"
+  #   # What the sign-in button offers to sign in with — the name people know
+  #   # the provider by. Defaults to "single sign-on".
+  #   displayName: "Keycloak"
+  #   # Keycloak leaves a public client's token with no audience at all, so the
+  #   # audience check cannot be the thing that ties a token to this client.
+  #   skipAudienceCheck: true
+  #   # The azp claim does that instead: it names the client the token was
+  #   # issued to. On unless set to false. Without it, and with the audience
+  #   # unchecked, every token the realm signs would be accepted here —
+  #   # including ones issued to other applications in the same realm.
+  #   # Turn it off only for a provider that does not issue azp; the error says
+  #   # so plainly if that is the case.
+  #   requireAuthorizedParty: true
+  #
+  #   The provider only establishes who someone is. Realm roles, client roles
+  #   and group claims grant nothing — roles are assigned in the portal, under
+  #   Access management. rolesClaim and groupMapping are refused at startup.
+  #
+  #   Groups are still read from the `groups` claim and shown next to each user,
+  #   but Keycloak does not emit them until a group membership mapper is added
+  #   to the client scope.
+  #
+  #   A user is identified by preferred_username. Renaming them in the provider
+  #   makes them a new record here, without the roles the old one held.
+  #
+  #   With no roles coming from the provider, bootstrapAdmins above is what
+  #   gives the first administrator access: list their preferred_username.
+
+# ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+# Who has signed in, and what they were granted in the UI, are kept here. It is
+# the only state this service owns — and the only thing worth backing up.
+# Normally a persistent volume; see the chart's persistence values.
+storage:
+  path: /data/devops-tools.json
+
+# ---------------------------------------------------------------------------
+# Kubernetes access
+# ---------------------------------------------------------------------------
+cluster:
+  # In-cluster uses the pod's ServiceAccount — the normal deployment mode.
+  inCluster: true
+  # Used only when inCluster is false (local development).
+  kubeconfig: ""
+  # A role granted "*" names no namespaces, so the list it is shown comes from
+  # the cluster itself. These are kept out of it. They are hidden, not
+  # forbidden: such a role can still open one by typing its name. Entries are
+  # exact names or a prefix ending in `*`.
+  # Omit the key for the default below; set it to [] to show everything.
+  hiddenNamespaces: ["kube-*", "default"]
+
+# Impersonation makes the API server see the end user instead of this service's
+# ServiceAccount, so Kubernetes RBAC applies as a second gate. Requires the
+# ServiceAccount to hold impersonate permissions.
+impersonation:
+  enabled: false
+  defaultGroup: "devops-tools-users"
+
+# ---------------------------------------------------------------------------
+# Optional integrations. Leave empty to hide the corresponding UI.
+# ---------------------------------------------------------------------------
+metrics:
+  # Prometheus powering the pod metrics tab (CPU, memory, JVM).
+  prometheusURL: ""
+  # e.g. http://prometheus-server.monitoring.svc.cluster.local
+
+logs:
+  # Loki powering historical logs. Without it only live Kubernetes logs work.
+  lokiURL: ""
+  # e.g. http://loki.monitoring.svc.cluster.local:3100
+
+# --- Access model -----------------------------------------------------------
+# Seeds an empty store on the very first start, and is then left alone: roles
+# are edited in the portal, under Access management, and kept on the volume.
+# Changing this later has no effect, and the service says so at startup.
+#
+# Which operations a role may name is not configured — it comes from the build,
+# so a name here that the code does not implement stops the service rather than
+# becoming a grant nothing ever checks.
+rbac:
+  roles:
+    # Full access everywhere. Give this to the platform team.
+    platform-admin:
+      description: Full access to every namespace
+      namespaces:
+        - namespace: "*"
+          operations: ["*"]
+      # Operations that belong to no namespace. Deliberately not implied by the
+      # wildcard above: reaching every namespace and administering the portal
+      # itself are different powers, and one should not silently confer the other.
+      global: [user-list, user-manage]
+  
+    # A typical application developer: full visibility into their own namespaces,
+    # able to restart and manage secrets, but not to uninstall a release.
+    developer:
+      description: Day-to-day operations in the team's namespaces
+      namespaces:
+        - namespace: my-app-dev
+          operations:
+            - logs
+            - describe
+            - metrics
+            - pod-restart
+            - helm-list
+            - helm-history
+            - secret-list
+            - secret-read
+            - secret-create
+            - secret-update
+  
+    # Read-only: useful for support, QA or anyone who should look but not touch.
+    viewer:
+      description: Read-only access, no secret values
+      namespaces:
+        - namespace: my-app-dev
+          operations: [logs, describe, metrics, helm-list, helm-history, secret-list]
+        - namespace: my-app-staging
+          operations: [logs, describe, metrics, helm-list, helm-history, secret-list]

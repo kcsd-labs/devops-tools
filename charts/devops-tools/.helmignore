@@ -1,0 +1,8 @@
+# Nothing but the chart goes into the package. Deployment values live outside
+# the chart directory and could not be picked up anyway, but the package is
+# published, so the rule is written down rather than assumed.
+values-*.yaml
+*.tgz
+.DS_Store
+.git/
+.gitignore

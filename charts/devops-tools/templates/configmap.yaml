@@ -1,0 +1,53 @@
+{{- /*
+Everything under `config` is rendered here verbatim, except the credentials.
+This file becomes a ConfigMap, and read access to those is given out far more
+freely than read access to a Secret — so a password written in values goes into
+the chart's Secret instead and reaches the container as an environment
+variable, which is the only form the service accepts one in.
+
+They are written in values next to the setting each belongs to, because that is
+where somebody installing this looks for them. The cost is these exceptions,
+which is why they are listed here and marked again beside every field.
+
+deepCopy so that removing them affects what is written here and not the values
+themselves — the Secret and the deployment still have to see them.
+*/ -}}
+{{- $config := deepCopy .Values.config -}}
+{{- $login := dig "auth" "bootstrapAdmins" "passwordLogin" dict $config -}}
+{{- $_ := unset $login "password" -}}
+{{- $_ = unset $login "passwordSecret" -}}
+{{- $ldap := dig "auth" "ldap" dict $config -}}
+{{- $_ = unset $ldap "bindPassword" -}}
+{{- $_ = unset $ldap "bindPasswordSecret" -}}
+{{- $consul := dig "configurations" "consul" dict $config -}}
+{{- $_ = unset $consul "token" -}}
+{{- $_ = unset $consul "tokenSecret" -}}
+{{- $git := dig "configurations" "git" dict $config -}}
+{{- $_ = unset $git "token" -}}
+{{- $_ = unset $git "tokenSecret" -}}
+{{- $rebuild := dig "imageRebuild" dict $config -}}
+{{- $_ = unset $rebuild "token" -}}
+{{- $_ = unset $rebuild "tokenSecret" -}}
+{{- /*
+The directory's CA is a file rather than a variable, so a certificate given in
+values is mounted from the Secret and caFile is pointed at it. Anything already
+written in caFile is a path the operator mounted themselves, and is left alone.
+*/ -}}
+{{- $ldapTLS := dig "auth" "ldap" "tls" dict $config -}}
+{{- if or $ldapTLS.caCert (dig "name" "" ($ldapTLS.caCertSecret | default dict)) -}}
+{{- $_ = set $ldapTLS "caFile" (include "devops-tools.ldapCAPath" .) -}}
+{{- end -}}
+{{- $_ = unset $ldapTLS "caCert" -}}
+{{- $_ = unset $ldapTLS "caCertSecret" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "devops-tools.fullname" . }}
+  labels: {{- include "devops-tools.labels" . | nindent 4 }}
+data:
+  # One file. The access model used to live in a second one, which bought
+  # nothing but a second place to look.
+  application.yaml: |
+    {{- toYaml $config | nindent 4 }}
+    rbac:
+      {{- toYaml .Values.rbacConfig | nindent 6 }}

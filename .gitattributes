@@ -1,0 +1,11 @@
+# Line endings are LF everywhere — in the repository and in the working tree.
+# Without this, git on Windows checks files out as CRLF and the same clone looks
+# modified from WSL, though nothing in it changed.
+* text=auto eol=lf
+
+# Leave binaries alone.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

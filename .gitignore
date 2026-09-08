@@ -1,0 +1,32 @@
+# --- secrets / environment ---
+.env
+*.env
+!.env.example
+kubeconfig*.yaml
+*.kubeconfig
+
+# --- Go ---
+/devops-tools
+/main
+*.exe
+*.test
+*.out
+
+# --- embedded UI (rebuilt by the image build; the placeholder is tracked) ---
+internal/ui/dist/*
+!internal/ui/dist/index.html
+
+# --- frontend ---
+web/node_modules/
+web/dist/
+web/.vite/
+npm-debug.log*
+
+# --- editors / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- logs ---
+*.log

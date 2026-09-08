@@ -1,0 +1,375 @@
+# Default values for DevOps Tools.
+#
+# This is the only file you edit. The `config:` block below is rendered into a
+# ConfigMap as application.yaml and mounted at /config, which is what the
+# service actually reads — the same way a chart for nginx turns values into an
+# nginx.conf. You never write that file yourself.
+#
+# It is a file rather than environment variables because the service also runs
+# outside Helm: from a directory during development, or from Consul. And the
+# settings nest several levels deep, which environment variables express badly.
+#
+# config/example/application.yaml in the repository is the same file with every
+# option documented. Read it to find out what a setting does; deploy this one.
+#
+# The image below is published, so a plain `helm install` works. To build your
+# own instead — which many organisations will prefer for a tool with these
+# permissions — point `repository` at your registry and pass VERSION:
+#   docker build --build-arg VERSION=0.25.2 -t <your-registry>/devops-tools:0.25.2 .
+# VERSION is what the sidebar and the startup log report; omitting it gives "dev".
+
+image:
+  repository: 1kcsd/devops-tools
+  tag: "" # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 1
+
+# --- Storage ------------------------------------------------------------
+# Who has signed in, and which roles they were assigned in the UI, are kept in
+# a JSON file on this volume. Everything else is deployed with the chart; this
+# is the only state the release owns, so it is also the only thing that needs
+# backing up. The claim survives `helm uninstall`.
+#
+# One replica only: the file is on a ReadWriteOnce volume. The chart refuses to
+# render otherwise rather than let two pods overwrite each other.
+persistence:
+  enabled: true
+  size: 128Mi
+  accessMode: ReadWriteOnce
+  # Leave empty to use the cluster's default class. On a cluster without one the
+  # claim stays Pending and the pod never starts, so set it explicitly there.
+  storageClass: ""
+  existingClaim: ""
+  annotations: {}
+
+# Anything else the container needs mounted. The directory's CA certificate no
+# longer belongs here — auth.ldap.tls.caCert takes the PEM directly, or
+# caCertSecret names a Secret holding it, and the chart mounts either for you.
+extraVolumes: []
+extraVolumeMounts: []
+
+# Extra arguments and environment for the container.
+extraEnv: []
+# - name: HTTP_PROXY
+#   value: http://proxy.example.com:3128
+
+# Whole Secrets imported as environment variables. Every credential this chart
+# needs can be named individually instead — see the fields beside each setting
+# below — which says which Secret holds what, rather than importing everything
+# in one and hoping the keys line up. This stays for anything else the service
+# reads from the environment.
+#
+# Note the order if both are used: an explicit entry beats envFrom, so a value
+# named beside its setting wins over the same variable arriving from here.
+envFromSecrets: []
+# - my-devops-tools-secrets
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    {}
+    # Live log streaming needs buffering off, otherwise the browser sees
+    # nothing until the connection closes:
+    # nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: devops-tools.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # - secretName: devops-tools-tls
+  #   hosts:
+  #     - devops-tools.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# The pod runs as a non-root user from a distroless base image.
+# runAsUser is set explicitly because runAsNonRoot alone is not enough: if the
+# image names its user instead of numbering it, the kubelet cannot tell whether
+# that user is root and refuses to start the container. 65532 is distroless's
+# nonroot user. Override it if you rebuild the image on a different base.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# --- Kubernetes permissions ------------------------------------------------
+# scope: cluster    one installation serves every namespace (what the in-app
+#                   RBAC then narrows down per user)
+# scope: namespace  restrict the service account to the release namespace —
+#                   pick this if a ClusterRole is not acceptable
+rbac:
+  create: true
+  scope: cluster
+  # Uninstalling a Helm release means deleting whatever that release created.
+  # Add the API groups of any custom resources your charts contain, otherwise
+  # the uninstall leaves them behind and reports a partial failure.
+  extraRules: []
+  # - apiGroups: ["redis.redis.opstreelabs.in"]
+  #   resources: ["redis", "redisclusters"]
+  #   verbs: ["get", "list", "watch", "delete"]
+
+# --- Session signing key ---------------------------------------------------
+# Used by the local and ldap providers. Left empty the chart generates one and
+# keeps it across upgrades. With more than one replica it must be shared, which
+# the generated secret already is.
+session:
+  existingSecret: "" # name of a secret holding key `sessionKey`
+  key: "" # or set the value directly (ends up in a Secret)
+
+# --- Application configuration ---------------------------------------------
+# Rendered into a ConfigMap and mounted at /config. See config/example for the
+# fully documented version.
+config:
+  environment: production
+
+  # What the interface calls itself. The technical name — module, chart, image,
+  # environment variables, the volume — stays DevOps Tools: renaming that would
+  # rename the PersistentVolumeClaim, and the access model with it.
+  ui:
+    brandName: "" # defaults to DevOps Tools
+    brandInitials: "" # the two-letter mark; derived from the name when empty
+
+  # Where the access model is written. Must be on the volume above.
+  storage:
+    path: /data/devops-tools.json
+
+  auth:
+    provider: local # local | ldap | oidc
+    session:
+      ttl: 8h
+
+    # The first administrator, and the way back in.
+    #
+    # These users always hold these roles, whatever the portal's own model says
+    # — a mistake there, or a lost volume, would otherwise lock everyone out.
+    #
+    # passwordLogin gives that account credentials of its own, usable whatever
+    # the provider is: before anyone has been granted access, and when the
+    # provider itself is unreachable. Configuring it puts a username and
+    # password form on the sign-in screen alongside the identity provider.
+    #
+    # It is a way in that your directory cannot revoke: off unless a password
+    # is set, announced in the log at every start and at every use, and rate
+    # limited like any other password form.
+    #
+    bootstrapAdmins:
+      users: [admin]
+      roles: [platform-admin]
+      passwordLogin:
+        # The account the password form signs in as — one of the users above.
+        # Leave it empty and there is no form at all.
+        username: admin
+
+        # The password, in plain text. Minimum 8 characters; the install fails
+        # rather than the pod crash-looping.
+        #
+        # Credentials do not travel into the ConfigMap the way the rest of
+        # `config` does — the chart moves this into a Secret of its own and
+        # hands it to the container as an environment variable. It is written
+        # here, beside the account it belongs to, because that is where you
+        # look for it while installing.
+        #
+        # It does stay in this file, though, and files get committed. Where
+        # that matters, leave it empty and name a Secret you made yourself in
+        # passwordSecret below. The two are mutually exclusive, and setting
+        # both is refused rather than resolved — which of them won would be an
+        # ordering, not a decision.
+        password: ""
+        passwordSecret:
+          name: ""
+          key: DEVOPS_TOOLS_BOOTSTRAP_PASSWORD
+
+        # Or a bcrypt hash, for where the password must not be readable even by
+        # whoever can read the Secret. One or the other, not both.
+        # Also DEVOPS_TOOLS_BOOTSTRAP_PASSWORD_HASH.
+        passwordHash: ""
+
+    # provider: local — accounts kept by the portal itself, for when there is no
+    # directory to authenticate against.
+    #
+    # Empty on purpose, and it does not need filling: sign in with the
+    # break-glass account above and create the rest under Access management,
+    # where a password is typed rather than hashed by hand.
+    #
+    # This list used to ship an account whose password was `admin`. It made a
+    # bare `helm install` signable-into, and it was published in this
+    # repository — which makes it a known password rather than a weak one, on
+    # every installation whose owner did not read far enough.
+    #
+    # Seeding accounts here is still possible, and needs a bcrypt hash:
+    #
+    #   docker run --rm <image> hash-password 'your-password'
+    #
+    #   users:
+    #     - username: ci
+    #       email: ci@example.com
+    #       passwordHash: "$2a$10$..."
+    #       roles: [platform-admin]
+    local:
+      users: []
+
+    # provider: ldap
+    # ldap:
+    #   url: "ldaps://ldap.example.com:636"
+    #   bindDN: "cn=devops-tools,ou=services,dc=example,dc=com"
+    #   # Its password: written here, or taken from a Secret you already have.
+    #   bindPassword: ""
+    #   bindPasswordSecret:
+    #     name: ""
+    #     key: DEVOPS_TOOLS_LDAP_BIND_PASSWORD
+    #   userSearchBase: "ou=people,dc=example,dc=com"
+    #   userFilter: "(uid=%s)"
+    #   groupSearchBase: "ou=groups,dc=example,dc=com"
+    #   groupFilter: "(member=%s)"
+    #   tls:
+    #     startTLS: true
+    #     # The certificate that signed the directory's, when it is not one the
+    #     # public roots cover — an internal CA, most often. Paste the PEM here
+    #     # and the chart mounts it and points the service at it; without it,
+    #     # StartTLS fails with "certificate signed by unknown authority".
+    #     #
+    #     # Or mount your own and name it in caFile instead.
+    #     caCert: |
+    #       -----BEGIN CERTIFICATE-----
+    #       ...
+    #       -----END CERTIFICATE-----
+    #     # Or the same certificate out of a Secret you already have. `key` is
+    #     # which entry holds the PEM; it is mounted as ca.crt either way.
+    #     caCertSecret:
+    #       name: ""
+    #       key: ca.crt
+    # Groups are read and shown against each user, but they do not grant
+    # anything: roles are assigned in the portal, under Users. A directory user
+    # signing in for the first time appears there with no access.
+
+    # provider: oidc
+    # oidc:
+    #   issuerURL: "https://keycloak.example.com/realms/main"
+    #   clientID: "devops-tools"
+    #   # Goes on the sign-in button: "Sign in with Keycloak".
+    #   displayName: "Keycloak"
+    #   skipAudienceCheck: true
+
+  cluster:
+    inCluster: true
+    # A role granted "*" is shown the cluster's namespaces rather than a list
+    # written out here. These are left out of that list — hidden only, not
+    # forbidden: opening one by name still works. Entries are exact names or a
+    # prefix ending in `*`. Set to [] to show everything.
+    hiddenNamespaces: ["kube-*", "default"]
+
+  impersonation:
+    enabled: false
+    defaultGroup: devops-tools-users
+
+  metrics:
+    prometheusURL: "" # http://prometheus-server.monitoring.svc.cluster.local
+
+  logs:
+    lokiURL: "" # http://loki.monitoring.svc.cluster.local:3100
+
+  # The Configurations page: the service configuration held in Consul's
+  # key/value store. Disabled by default — the page does not exist, and its
+  # endpoints answer 404.
+  #
+  # Scope the token to the same prefix. `prefix` bounds what the portal shows,
+  # but only the token bounds what it could write if this were ever set wrong:
+  #
+  #   key_prefix "config/" { policy = "write" }
+  configurations:
+    consul:
+      enabled: false
+      address: "" # http://consul-server.consul.svc.cluster.local:8500
+      prefix: config/
+      # Written here, or taken from a Secret you already have. Either way it
+      # reaches the container as CONSUL_HTTP_TOKEN and never enters the
+      # ConfigMap. Both at once is refused.
+      token: ""
+      tokenSecret:
+        name: ""
+        key: CONSUL_HTTP_TOKEN
+
+    # Where a synchroniser copies a Git repository into Consul, edit the
+    # repository instead: a change written straight to Consul is undone on the
+    # synchroniser's next run, and leaves no record of who made it or why.
+    #
+    # Use a project access token with the `api` scope, not a personal one — a
+    # personal token reaches everything its owner does, and this needs one
+    # repository.
+    #
+    # Both together is the fullest arrangement: the repository decides what
+    # should exist, a save commits and then writes Consul at once rather than
+    # waiting for the synchroniser, and the page shows where the two have
+    # drifted apart. It also offers a Consul-only write for when a service has
+    # to be fixed before a pipeline can run.
+    git:
+      enabled: false
+      url: "" # https://gitlab.example.com
+      project: "" # group/subgroup/configuration
+      # One branch per instance. An instance able to write to several would be
+      # a way to edit production from the development portal.
+      branch: ""
+      basePath: "" # folder inside the repository; empty means its root
+      # As above: written here or named in a Secret, out as GITLAB_TOKEN,
+      # never into the ConfigMap.
+      token: ""
+      tokenSecret:
+        name: ""
+        key: GITLAB_TOKEN
+
+
+# --- Access model ----------------------------------------------------------
+# The roles a fresh installation starts with. This SEEDS AN EMPTY STORE and is
+# then never applied again: roles are edited in the UI, under Roles, and kept on
+# the volume, so a later `helm upgrade` cannot undo them. Changing this after
+# the first install has no effect.
+# See config/example/application.yaml for the annotated version.
+rbacConfig:
+  # The operations a role may be granted are not listed here: they come from the
+  # build, filtered by which optional features are switched on. A list kept by
+  # hand beside the constants in the code drifts, and both directions are quiet
+  # — a name the code never checks becomes a grant that does nothing, and a name
+  # it does check but the list omits cannot be granted at all.
+
+  roles:
+    platform-admin:
+      description: Full access to every namespace
+      namespaces:
+        - namespace: "*"
+          operations: ["*"]
+      # Reaching every namespace and administering the portal are different
+      # powers, so these are listed rather than implied by the wildcard above.
+      global: [user-list, user-manage]

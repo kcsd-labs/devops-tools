@@ -1,0 +1,99 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "devops-tools.serviceAccountName" . }}
+  labels: {{- include "devops-tools.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{- if .Values.rbac.create }}
+{{- $cluster := eq .Values.rbac.scope "cluster" }}
+---
+# What the service account may do in Kubernetes. This is the outer boundary;
+# which user may do what inside it is decided by the in-app access model.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if $cluster }}ClusterRole{{ else }}Role{{ end }}
+metadata:
+  name: {{ include "devops-tools.fullname" . }}
+  {{- if not $cluster }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
+  labels: {{- include "devops-tools.labels" . | nindent 4 }}
+rules:
+  # Read pods, their logs and their events.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+
+  {{- if $cluster }}
+  # A role granted "*" names no namespaces, so the list it is shown has to come
+  # from the cluster. Without this the page falls back to typing a name.
+  # Only under a ClusterRole: namespaces are cluster-scoped, so granting them in
+  # a namespaced Role would grant nothing at all.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+
+  # Rolling restart patches the workload's pod template; the rest is needed to
+  # resolve which workload owns a pod and to report rollout progress.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch", "patch"]
+
+  # Secret management, and Helm release storage (Helm keeps releases in secrets).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Helm needs to see what a release created before it can remove it.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+
+  # Uninstalling a Helm release deletes whatever that release created. These are
+  # the usual kinds; add your own under rbac.extraRules for anything else,
+  # especially custom resources — without them an uninstall leaves orphans.
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "serviceaccounts", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["create", "update", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  {{- with .Values.rbac.extraRules }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ if $cluster }}ClusterRoleBinding{{ else }}RoleBinding{{ end }}
+metadata:
+  name: {{ include "devops-tools.fullname" . }}
+  {{- if not $cluster }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
+  labels: {{- include "devops-tools.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: {{ if $cluster }}ClusterRole{{ else }}Role{{ end }}
+  name: {{ include "devops-tools.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "devops-tools.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

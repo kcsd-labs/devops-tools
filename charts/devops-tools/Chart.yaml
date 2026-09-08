@@ -1,0 +1,16 @@
+apiVersion: v2
+name: devops-tools
+description: Self-service portal for Kubernetes — logs, metrics, restarts, secrets and Helm releases for developers, without cluster access
+type: application
+version: 0.27.4
+appVersion: "0.25.2"
+keywords:
+  - kubernetes
+  - self-service
+  - developer-portal
+  - platform-engineering
+home: https://github.com/kcsd-labs/devops-tools
+sources:
+  - https://github.com/kcsd-labs/devops-tools
+maintainers:
+  - name: DevOps Tools contributors

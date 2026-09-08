@@ -1,0 +1,40 @@
+DevOps Tools {{ .Chart.AppVersion }} is installed as {{ include "devops-tools.fullname" . }}.
+
+Reach the UI:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "devops-tools.fullname" . }} 8080:{{ .Values.service.port }}
+  then open http://localhost:8080
+{{- end }}
+
+Signing in:
+{{- if eq .Values.config.auth.provider "local" }}
+  Provider: local accounts from values.yaml.
+
+  ⚠  The default account is admin / admin. Replace it before anyone else can
+     reach this service:
+
+       docker run --rm {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }} hash-password 'a-strong-password'
+
+     then put the hash into config.auth.local.users[0].passwordHash and upgrade.
+{{- else if eq .Values.config.auth.provider "ldap" }}
+  Provider: LDAP ({{ .Values.config.auth.ldap.url }}).
+  The bind password must come from a secret listed in envFromSecrets as
+  DEVOPS_TOOLS_LDAP_BIND_PASSWORD.
+{{- else }}
+  Provider: OIDC ({{ .Values.config.auth.oidc.issuerURL }}).
+  Register {{ .Values.config.auth.oidc.clientID }} with a redirect URI pointing
+  at this installation.
+{{- end }}
+
+Access model: users get roles from the provider, and rbacConfig maps those
+roles to namespaces and operations. Everything not granted is denied.
+
+{{- if eq .Values.rbac.scope "namespace" }}
+
+Note: rbac.scope is "namespace", so this installation only sees
+{{ .Release.Namespace }}.
+{{- end }}

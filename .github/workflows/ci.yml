@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # From go.mod, so the toolchain here is the one the Dockerfile builds with
+      # and nobody has to remember to bump two places.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test ./...
+
+  web:
+    name: Web interface
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # tsc first: it says which line is wrong, where a failed bundle often does
+      # not.
+      - run: npx tsc -b
+      - run: npm run build
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/devops-tools
+      # Rendering catches what lint does not: a template that only breaks once
+      # values reach it.
+      - name: Render with defaults
+        run: |
+          helm template t charts/devops-tools \
+            --set config.auth.bootstrapAdmins.passwordLogin.password=rendered-in-ci \
+            > /dev/null
+      # Rendering with no password at all still has to work: refusing that is
+      # the service's job, at startup, where it can see the environment as well
+      # as the file. The chart only refuses what it can judge for itself — a
+      # password too short, or both forms of one credential at once.
+      - name: Refuses a password that is too short
+        run: |
+          if helm template t charts/devops-tools \
+               --set config.auth.bootstrapAdmins.passwordLogin.password=short \
+               > /dev/null 2>&1; then
+            echo "a five-character password was accepted"
+            exit 1
+          fi
+
+  vulnerabilities:
+    name: Known vulnerabilities
+    runs-on: ubuntu-latest
+    # A signal, not a gate. Some findings have no fix available upstream, and
+    # blocking every unrelated pull request on them teaches people to ignore the
+    # job. Read it; act when something newly fixable appears.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...

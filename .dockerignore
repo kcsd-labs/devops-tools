@@ -1,0 +1,39 @@
+# The build context is sent to the daemon — or to kaniko — before anything is
+# built. Everything here is either rebuilt inside the image or has no business
+# in it.
+
+# Installed again by the web stage; sending it costs minutes and changes nothing.
+web/node_modules/
+web/dist/
+web/.vite/
+
+# The UI is copied in from the web stage. The placeholder in the repository is
+# only there so the Go build has something to embed when run outside Docker.
+internal/ui/dist/
+
+.git/
+.gitignore
+.gitlab-ci.yml
+
+# Local binaries, should anyone have built one.
+/devops-tools
+/main
+*.exe
+*.test
+*.out
+
+# Not part of the image: the chart is installed with helm, the docs are read on
+# the web.
+charts/
+values-*.yaml
+docs/
+README.md
+SECURITY.md
+
+# Anything an operator left lying about.
+*.env
+!.env.example
+kubeconfig*.yaml
+*.kubeconfig
+*.pem
+*.log
