@@ -68,18 +68,3 @@ jobs:
             echo "a five-character password was accepted"
             exit 1
           fi
-
-  vulnerabilities:
-    name: Known vulnerabilities
-    runs-on: ubuntu-latest
-    # A signal, not a gate. Some findings have no fix available upstream, and
-    # blocking every unrelated pull request on them teaches people to ignore the
-    # job. Read it; act when something newly fixable appears.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - run: govulncheck ./...

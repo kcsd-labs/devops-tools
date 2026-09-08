@@ -1,0 +1,23 @@
+# Findings govulncheck reports that have no fix available upstream.
+#
+# The weekly scan compares what it finds against this list and fails only on
+# something new. A job that is red every week for reasons nobody can act on is
+# a job people stop reading.
+#
+# Remove an entry when a fixed version appears and the dependency is updated —
+# the scan will then be silent about it, and loud again if it comes back.
+#
+# Every one of these is reached only through package initialisation: helm links
+# the code in, and the portal never calls it. That is an assessment, not a
+# guarantee, and it stops holding the day this starts installing charts or
+# verifying their provenance.
+
+# golang.org/x/crypto/openpgp — unmaintained by its authors, no fix planned.
+# Pulled in by helm for chart provenance, which the portal does not use.
+GO-2026-5932
+
+# containerd, three findings in image decompression. Pulled in by helm for OCI
+# registry work, which the portal does not do.
+GO-2026-5622
+GO-2026-5338
+GO-2026-5064

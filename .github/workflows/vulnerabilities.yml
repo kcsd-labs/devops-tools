@@ -1,0 +1,70 @@
+name: Vulnerabilities
+
+# On a schedule rather than on every change: a vulnerability is published when
+# somebody else commits, not when we do. Attaching this to our commits would
+# both miss those days and paint every commit red for findings nobody can act
+# on.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: Reachable vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Scan
+        id: scan
+        run: |
+          # Non-zero exit only means findings exist; whether that matters is
+          # decided in the next step.
+          govulncheck ./... > report.txt 2>&1 || true
+          cat report.txt
+
+      - name: Fail only on something new
+        run: |
+          # The "Vulnerability #N: GO-..." headings are the ones govulncheck
+          # considers reachable from our code. Anything it merely found in the
+          # dependency graph is listed elsewhere and not our concern here.
+          grep -oE '^Vulnerability #[0-9]+: (GO-[0-9]{4}-[0-9]+)' report.txt \
+            | grep -oE 'GO-[0-9]{4}-[0-9]+' | sort -u > found.txt || true
+          grep -oE '^GO-[0-9]{4}-[0-9]+' .github/known-vulnerabilities.txt \
+            | sort -u > known.txt
+
+          echo "reachable now:"; sed 's/^/  /' found.txt
+          echo "known, no fix upstream:"; sed 's/^/  /' known.txt
+
+          new=$(comm -23 found.txt known.txt)
+          gone=$(comm -13 found.txt known.txt)
+
+          if [ -n "$gone" ]; then
+            echo
+            echo "No longer reported, so the entry can come out of"
+            echo ".github/known-vulnerabilities.txt:"
+            echo "$gone" | sed 's/^/  /'
+          fi
+
+          if [ -n "$new" ]; then
+            echo
+            echo "New findings, not on the known list:"
+            echo "$new" | sed 's/^/  /'
+            echo
+            echo "Update the dependency if a fix exists. If none does, read the"
+            echo "trace in the log above, decide whether the code is actually"
+            echo "reachable, and add it to .github/known-vulnerabilities.txt"
+            echo "with the reason."
+            exit 1
+          fi
+
+          echo
+          echo "Nothing new."
