@@ -1,0 +1,90 @@
+# DevOps Tools behind Keycloak, or any other OpenID Connect provider.
+#
+#   helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
+#     --namespace devops-tools --create-namespace -f values-oidc.yaml
+#
+# The client in Keycloak: standard flow on, public rather than confidential —
+# the portal runs the authorization code flow with PKCE from the browser and
+# has nowhere to keep a client secret. Valid redirect URI and web origin are
+# the portal's address.
+#
+# Roles held in the provider are not read. They are assigned in the portal,
+# under Users; a person signing in for the first time has no access.
+#
+# Set here is what an OIDC install has to decide. Commented lines are the
+# alternatives to each choice; everything not mentioned keeps its default and
+# is documented in charts/devops-tools/values.yaml.
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # Live log streaming needs buffering off, or the browser sees nothing until
+    # the connection closes.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: devops-tools.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # tls:
+  #   - secretName: devops-tools-tls
+  #     hosts:
+  #       - devops-tools.example.com
+
+persistence:
+  # Set on a cluster without a default class, or the claim stays Pending.
+  storageClass: ""
+
+config:
+  auth:
+    provider: oidc
+
+    oidc:
+      issuerURL: "https://keycloak.example.com/realms/main"
+      clientID: "devops-tools"
+      # Goes on the sign-in button: "Sign in with Keycloak". Defaults to
+      # "single sign-on".
+      displayName: "Keycloak"
+      # Keycloak leaves a public client out of the token's aud unless an
+      # audience mapper is added, so this is normally on there.
+      skipAudienceCheck: true
+      # Which is what makes the azp check matter: with the audience unchecked
+      # it is the only thing keeping tokens issued to other clients in the
+      # realm out. On unless turned off — for a provider that omits azp.
+      # requireAuthorizedParty: false
+
+    bootstrapAdmins:
+      # preferred_username of whoever administers the portal. Required here:
+      # the provider grants no roles, so without this nobody can grant the
+      # first one and the service refuses to start.
+      users: [admin]
+      roles: [platform-admin]
+
+      passwordLogin:
+        # A password form beside the provider button, for the first sign-in and
+        # for when the provider is unreachable. No username, no form.
+        username: admin
+        # Minimum 8 characters. Empty, the service refuses to start.
+        password: ""
+        passwordSecret:
+          name: ""
+          key: DEVOPS_TOOLS_BOOTSTRAP_PASSWORD
+        # Or, instead of either of the two above, a bcrypt hash — where even
+        # the Secret should not hold something readable.
+        # passwordHash: ""
+
+  # Optional. Left empty, the graphs and the historical log tab do not appear.
+  metrics:
+    prometheusURL: ""
+  logs:
+    lokiURL: ""
+
+  # The Configurations page — service configuration held in Consul, optionally
+  # backed by a Git repository — is off until configured, and its endpoints
+  # answer 404. See charts/devops-tools/values.yaml.
+  # configurations:
+  #   consul:
+  #     enabled: true
+  #     address: "http://consul-server.consul.svc.cluster.local:8500"

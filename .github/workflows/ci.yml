@@ -56,6 +56,14 @@ jobs:
           helm template t charts/devops-tools \
             --set config.auth.bootstrapAdmins.passwordLogin.password=rendered-in-ci \
             > /dev/null
+      # The examples are install instructions, so a broken one is a broken README.
+      - name: Render the examples
+        run: |
+          for f in examples/*.yaml; do
+            helm template t charts/devops-tools -f "$f" \
+              --set config.auth.bootstrapAdmins.passwordLogin.password=rendered-in-ci \
+              > /dev/null
+          done
       # Rendering with no password at all still has to work: refusing that is
       # the service's job, at startup, where it can see the environment as well
       # as the file. The chart only refuses what it can judge for itself — a

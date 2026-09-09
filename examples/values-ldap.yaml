@@ -1,0 +1,117 @@
+# DevOps Tools with Active Directory or OpenLDAP.
+#
+#   helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
+#     --namespace devops-tools --create-namespace -f values-ldap.yaml
+#
+# The directory only establishes who someone is. Roles are assigned in the
+# portal, under Users; a person signing in for the first time has no access.
+#
+# Set here is what an LDAP install has to decide. Commented lines are the
+# alternatives to each choice; everything not mentioned keeps its default and
+# is documented in charts/devops-tools/values.yaml.
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # Live log streaming needs buffering off, or the browser sees nothing until
+    # the connection closes.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: devops-tools.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # tls:
+  #   - secretName: devops-tools-tls
+  #     hosts:
+  #       - devops-tools.example.com
+
+persistence:
+  # Set on a cluster without a default class, or the claim stays Pending.
+  storageClass: ""
+
+config:
+  auth:
+    provider: ldap
+
+    ldap:
+      url: "ldap://dc.example.com:389"
+      # The account the portal binds as to search the directory.
+      bindDN: "cn=devops-tools,ou=services,dc=example,dc=com"
+      bindPassword: ""
+      # Or out of a Secret you already have. One form or the other, not both.
+      bindPasswordSecret:
+        name: ""
+        key: DEVOPS_TOOLS_LDAP_BIND_PASSWORD
+
+      userSearchBase: "ou=people,dc=example,dc=com"
+      # %s is the typed username. (uid=%s) on OpenLDAP.
+      userFilter: "(sAMAccountName=%s)"
+      # The attribute holding the address. Default: mail.
+      # emailAttribute: mail
+
+      # Groups are shown against each user as the context for granting a role;
+      # they grant nothing themselves. %s is the user DN, %u the username.
+      # Leave both empty to read the user's memberOf instead of searching.
+      groupSearchBase: "ou=groups,dc=example,dc=com"
+      groupFilter: "(member=%s)"
+      # The attribute used as the group name. Default: cn.
+      # groupNameAttribute: cn
+
+      tls:
+        # Plain ldap:// carries the bind password and every sign-in across the
+        # network in clear text, so it is refused unless allowed here by name.
+        insecureAllowPlaintext: true
+
+        # Encrypted instead: ldaps://dc.example.com:636 in the url above, or
+        # StartTLS on the plain port — and drop insecureAllowPlaintext.
+        # startTLS: true
+        #
+        # Either way, the CA that signed the directory's certificate, unless
+        # the public roots cover it. Without it the connection fails with
+        # "certificate signed by unknown authority".
+        # caCert: |
+        #   -----BEGIN CERTIFICATE-----
+        #   ...
+        #   -----END CERTIFICATE-----
+        #
+        # Or that certificate out of a Secret you already have. `key` is which
+        # entry holds the PEM; it is mounted as ca.crt either way.
+        # caCertSecret:
+        #   name: ""
+        #   key: ca.crt
+
+    bootstrapAdmins:
+      # Usernames that always hold these roles, whatever the portal's own model
+      # says. The way back in if access is misconfigured or the volume is lost.
+      users: [admin]
+      roles: [platform-admin]
+
+      passwordLogin:
+        # A password form beside the directory sign-in, for the first sign-in
+        # and for when the directory is unreachable. No username, no form.
+        username: admin
+        # Minimum 8 characters. Empty, the service refuses to start.
+        password: ""
+        passwordSecret:
+          name: ""
+          key: DEVOPS_TOOLS_BOOTSTRAP_PASSWORD
+        # Or, instead of either of the two above, a bcrypt hash — where even
+        # the Secret should not hold something readable.
+        # passwordHash: ""
+
+  # Optional. Left empty, the graphs and the historical log tab do not appear.
+  metrics:
+    prometheusURL: ""
+  logs:
+    lokiURL: ""
+
+  # The Configurations page — service configuration held in Consul, optionally
+  # backed by a Git repository — is off until configured, and its endpoints
+  # answer 404. See charts/devops-tools/values.yaml.
+  # configurations:
+  #   consul:
+  #     enabled: true
+  #     address: "http://consul-server.consul.svc.cluster.local:8500"

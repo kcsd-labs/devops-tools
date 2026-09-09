@@ -161,7 +161,10 @@ the volume instead, with the workload stopped so nothing is writing to it:
 
 ```bash
 kubectl -n devops-tools scale deploy/devops-tools --replicas=0
-kubectl -n devops-tools run access-backup --rm --attach --restart=Never   --image=busybox --quiet   --overrides='{"spec":{"containers":[{"name":"c","image":"busybox","command":["cat","/data/devops-tools.json"],"volumeMounts":[{"name":"d","mountPath":"/data"}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"devops-tools"}}]}}'   > devops-tools-access-backup.json
+kubectl -n devops-tools run access-backup --rm --attach --restart=Never \
+  --image=busybox --quiet \
+  --overrides='{"spec":{"containers":[{"name":"c","image":"busybox","command":["cat","/data/devops-tools.json"],"volumeMounts":[{"name":"d","mountPath":"/data"}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"devops-tools"}}]}}' \
+  > devops-tools-access-backup.json
 kubectl -n devops-tools scale deploy/devops-tools --replicas=1
 ```
 
@@ -182,16 +185,38 @@ helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
   --set config.auth.bootstrapAdmins.passwordLogin.password='pick-something'
 ```
 
+### With a values file
+
+The line above is a bare install with `local` accounts. Everything past it — a
+directory, an identity provider, an ingress, a storage class — belongs in a
+file rather than a growing list of `--set` flags:
+
+```bash
+helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
+  --namespace devops-tools --create-namespace \
+  -f values-ldap.yaml
+```
+
+Two minimal ones to start from:
+
+- [`examples/values-ldap.yaml`](examples/values-ldap.yaml) — Active Directory or OpenLDAP over LDAPS
+- [`examples/values-oidc.yaml`](examples/values-oidc.yaml) — Keycloak, and anything else speaking OpenID Connect
+
+Both leave the administrator password empty, to be filled in or replaced by the
+name of a Secret that holds it.
+
+### Building it yourself
+
 Many organisations will prefer to build a tool with these permissions
 themselves. Pass `VERSION` so the running instance can say which build it is —
 it appears in the sidebar and in the startup log; without it the build calls
 itself `dev`.
 
 ```bash
-git clone https://github.com/devops-tools/devops-tools
+git clone https://github.com/kcsd-labs/devops-tools
 cd devops-tools
 
-VERSION=0.25.0
+VERSION=0.25.2
 docker build --build-arg VERSION=$VERSION -t registry.example.com/devops-tools:$VERSION .
 docker push registry.example.com/devops-tools:$VERSION
 

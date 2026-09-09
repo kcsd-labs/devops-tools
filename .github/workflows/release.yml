@@ -76,8 +76,39 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           APP: ${{ steps.v.outputs.app }}
           CHART: ${{ steps.v.outputs.chart }}
+          REPO: ${{ github.repository }}
         run: |
-          printf 'Image: %s:%s\nChart version: %s\n\nInstall:\n\n    helm install devops-tools %s/devops-tools --version %s \\\n      --namespace devops-tools --create-namespace \\\n      --set config.auth.bootstrapAdmins.passwordLogin.password=SOMETHING\n' \
-            "$IMAGE" "$APP" "$CHART" "$CHART_REGISTRY" "$CHART" > notes.md
+          # Quoted heredoc: the code fences below would otherwise be read as
+          # command substitution. Values go in afterwards.
+          cat > notes.md <<'NOTES'
+          Image: `__IMAGE__:__APP__`
+          Chart version: `__CHART__`
+
+          ## Install
+
+          ```bash
+          helm install devops-tools __REGISTRY__/devops-tools --version __CHART__ \
+            --namespace devops-tools --create-namespace \
+            --set config.auth.bootstrapAdmins.passwordLogin.password=SOMETHING
+          ```
+
+          That is a bare install with `local` accounts. For a directory or an
+          identity provider, start from an example values file:
+
+          ```bash
+          curl -O https://raw.githubusercontent.com/__REPO__/__TAG__/examples/values-ldap.yaml
+          # fill it in, then
+          helm install devops-tools __REGISTRY__/devops-tools --version __CHART__ \
+            --namespace devops-tools --create-namespace \
+            -f values-ldap.yaml
+          ```
+
+          `examples/values-oidc.yaml` is the same for Keycloak and anything else
+          speaking OpenID Connect.
+          NOTES
+
+          sed -i "s|__IMAGE__|$IMAGE|g; s|__APP__|$APP|g" notes.md
+          sed -i "s|__CHART__|$CHART|g; s|__REGISTRY__|$CHART_REGISTRY|g" notes.md
+          sed -i "s|__REPO__|$REPO|g; s|__TAG__|$GITHUB_REF_NAME|g" notes.md
           cat notes.md
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
