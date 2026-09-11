@@ -15,7 +15,7 @@
 # The image below is published, so a plain `helm install` works. To build your
 # own instead — which many organisations will prefer for a tool with these
 # permissions — point `repository` at your registry and pass VERSION:
-#   docker build --build-arg VERSION=0.25.2 -t <your-registry>/devops-tools:0.25.2 .
+#   docker build --build-arg VERSION=0.25.3 -t <your-registry>/devops-tools:0.25.3 .
 # VERSION is what the sidebar and the startup log report; omitting it gives "dev".
 
 image:

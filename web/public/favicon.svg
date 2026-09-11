@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Prompt and input line, in the interface's own palette: bg #0E131E,
+       text #E6EAF2, accent #3B82F6. Coordinates sit on even units so the
+       shapes land on whole pixels when the browser draws this at 16. -->
+  <rect width="32" height="32" rx="8" fill="#0E131E"/>
+  <path d="M8 10 L14 16 L8 22" fill="none" stroke="#E6EAF2" stroke-width="4"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="18" y="18" width="8" height="4" rx="2" fill="#3B82F6"/>
+</svg>

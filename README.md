@@ -216,7 +216,7 @@ itself `dev`.
 git clone https://github.com/kcsd-labs/devops-tools
 cd devops-tools
 
-VERSION=0.25.2
+VERSION=0.25.3
 docker build --build-arg VERSION=$VERSION -t registry.example.com/devops-tools:$VERSION .
 docker push registry.example.com/devops-tools:$VERSION
 
