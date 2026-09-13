@@ -119,6 +119,31 @@ func (a *Authorizer) VisibleConfigPaths(roles []string) []string {
 	return sortedKeys(set)
 }
 
+// NamespacesForOp lists the namespaces where these roles permit one operation.
+// A wildcard grant returns ["*"]. Unlike VisibleNamespaces, which answers "what
+// is this person's world", this answers "where may they do this particular
+// thing" — the audit trail is scoped by the second question, not the first.
+func (a *Authorizer) NamespacesForOp(roles []string, op string) []string {
+	cfg := a.cfg.Load()
+	set := map[string]bool{}
+	for _, role := range roles {
+		spec, ok := cfg.Roles[role]
+		if !ok {
+			continue
+		}
+		for _, grant := range spec.Namespaces {
+			if !hasOp(grant.Operations, op) {
+				continue
+			}
+			if grant.Namespace == "*" {
+				return []string{"*"}
+			}
+			set[grant.Namespace] = true
+		}
+	}
+	return sortedKeys(set)
+}
+
 // VisibleNamespaces lists the namespaces the user may see. A wildcard grant
 // returns ["*"], which the caller presents as free-form input rather than
 // enumerating every namespace in the cluster.

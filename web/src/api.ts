@@ -35,6 +35,42 @@ export interface Capabilities {
   manageUsers: boolean;
   /** A configuration source is enabled AND the caller was granted a path in it. */
   configurations: boolean;
+  /** A trail can be read at all, AND the caller holds audit-read somewhere. */
+  audit: boolean;
+}
+
+/** One recorded action. */
+export interface AuditEntry {
+  time: string;
+  user: string;
+  /** Empty for the actions that belong to no namespace: sign-ins, grants. */
+  namespace: string;
+  operation: string;
+  target: string;
+  allowed: boolean;
+  success: boolean;
+  error: string;
+}
+
+export interface AuditPage {
+  entries: AuditEntry[];
+  /** Unix milliseconds to pass as `to` for the next page. Zero at the horizon,
+      which is what stops the interface offering to load more. */
+  next: number;
+  /** "loki" reaches back as far as its retention; "pods" only as far as the
+      node has kept the logs, which is hours. */
+  source: "loki" | "pods" | "";
+  /** Seconds. How far back this deployment will look. */
+  horizon: number;
+  /** The operation vocabulary, for the filter. */
+  operations: string[];
+  /** What the caller may see, for the interface to say so plainly. */
+  namespaces: string[] | null;
+  allNamespaces: boolean;
+  global: boolean;
+  /** Where older events went, if anywhere. Both empty means nothing to say. */
+  archiveNote: string;
+  archiveURL: string;
 }
 
 /** One configuration entry, as listed. */
@@ -234,6 +270,27 @@ export function createApi(token: string | undefined) {
   return {
     me: () => getJSON<Me>("/me"),
     namespaces: () => getJSON<NamespaceList>("/namespaces"),
+
+    /** One page of the audit trail, newest first. Paging walks backwards: pass
+        the `next` of the previous page as `to`. */
+    audit: (q: {
+      to?: number;
+      from?: number;
+      operation?: string;
+      user?: string;
+      filter?: string;
+      limit?: number;
+    }) => {
+      const p = new URLSearchParams();
+      if (q.to) p.set("to", String(q.to));
+      if (q.from) p.set("from", String(q.from));
+      if (q.operation) p.set("operation", q.operation);
+      if (q.user) p.set("user", q.user);
+      if (q.filter) p.set("filter", q.filter);
+      if (q.limit) p.set("limit", String(q.limit));
+      const qs = p.toString();
+      return getJSON<AuditPage>("/audit" + (qs ? `?${qs}` : ""));
+    },
 
     users: () => getJSON<PortalUser[]>("/users"),
     roles: () =>

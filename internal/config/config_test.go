@@ -38,3 +38,24 @@ func TestShippedDefaultHashIsUsable(t *testing.T) {
 		t.Fatalf("the default passwordHash in values.yaml is unusable: %v", err)
 	}
 }
+
+func TestAuditReadIsOfferedOnlyWhenThereIsATrailToRead(t *testing.T) {
+	has := func(c *Config) bool {
+		for _, op := range Operations(c) {
+			if op == OpAuditRead {
+				return true
+			}
+		}
+		return false
+	}
+
+	if has(&Config{}) {
+		t.Error("audit-read was offered with no Loki and no cluster: the page would have nothing to show")
+	}
+	if !has(&Config{Logs: LogsConfig{LokiURL: "http://loki:3100"}}) {
+		t.Error("audit-read was not offered although Loki is configured")
+	}
+	if !has(&Config{Cluster: ClusterConfig{InCluster: true}}) {
+		t.Error("audit-read was not offered although the service can read its own pod logs")
+	}
+}

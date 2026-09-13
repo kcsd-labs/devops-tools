@@ -18,6 +18,7 @@ import (
 
 	"devops-tools/internal/api"
 	"devops-tools/internal/audit"
+	"devops-tools/internal/auditlog"
 	"devops-tools/internal/auth"
 	"devops-tools/internal/config"
 	"devops-tools/internal/configsource"
@@ -214,9 +215,25 @@ func main() {
 			"environments", c.Environments, "buildJobs", c.BuildJobs, "deployJobs", c.DeployJobs)
 	}
 
+	// The audit page reads back what auditLog writes. Nothing is stored for it:
+	// the service finds its own log stream — in Loki by label, otherwise through
+	// the API — which first means finding out how it is labelled.
+	var trail *auditlog.Reader
+	id, err := km.Identify(context.Background(),
+		os.Getenv("DEVOPS_TOOLS_POD_NAMESPACE"), os.Getenv("DEVOPS_TOOLS_POD_NAME"))
+	switch {
+	case err != nil:
+		slog.Info("the audit page is off: cannot identify this pod", "reason", err)
+	default:
+		self := auditlog.Self{Namespace: id.Namespace, App: id.App, Selector: id.Selector}
+		trail = auditlog.New(self, lokiClient, km, cfg.Logs.Horizon)
+		slog.Info("audit page enabled", "source", trail.Source(), "horizon", trail.Horizon())
+	}
+
 	srv := api.NewServer(cfg, authorizer, km, auditLog, authSvc, userStore,
 		promClient, lokiClient, configs, rebuildClient).
-		WithOperations(rbacCfg.Operations)
+		WithOperations(rbacCfg.Operations).
+		WithAuditLog(trail)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Addr,

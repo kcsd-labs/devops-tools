@@ -30,6 +30,7 @@ log of everything that happened.
 | **Restarts** | rolling restart of the pod's workload, with live progress and a plain-language explanation when a rollout gets stuck |
 | **Secrets** | browse, view, edit, create — every read is audited individually |
 | **Helm** | releases, revision history, rollback, uninstall |
+| **Audit** | who did what, in the namespaces you may see — read back from Loki, or from the service's own pod logs where there is none |
 
 Metrics and historical logs are optional: leave them
 unconfigured and the corresponding UI simply does not appear.
@@ -288,6 +289,11 @@ Secrets never live in the configuration file:
 
 - Every action is written to a structured audit log and counted in a Prometheus
   metric — including reads of individual secrets and failed sign-in attempts.
+  The **Audit** page reads that trail back. Nothing is stored for it: the
+  entries are the log lines. What each person sees is scoped by where they hold
+  `audit-read` — in a namespace it shows everyone's actions there, which is how
+  "who restarted my service" gets an answer; sign-ins and access changes belong
+  to no namespace and need the global grant.
 - Password logins are rate limited per account.
 - The container runs as a non-root user from a distroless base image with a
   read-only root filesystem.

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -73,6 +74,13 @@ func (c *Client) QueryRange(ctx context.Context, logql string, start, end time.T
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Loki explains itself in the body — "the query time range exceeds the
+		// limit" and the like. A bare status code sends the reader looking in
+		// the wrong place.
+		why, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		if msg := strings.TrimSpace(string(why)); msg != "" {
+			return nil, fmt.Errorf("loki: %s", msg)
+		}
 		return nil, fmt.Errorf("loki status %d", resp.StatusCode)
 	}
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"devops-tools/internal/audit"
+	"devops-tools/internal/auditlog"
 	"devops-tools/internal/auth"
 	"devops-tools/internal/version"
 )
@@ -97,6 +98,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			// this person was granted a path in it. Someone with no grant would
 			// otherwise find the page and an empty list, which reads as a fault.
 			"configurations": s.configs != nil && len(s.authz.VisibleConfigPaths(user.Roles)) > 0,
+			// Same shape: the deployment can read a trail at all, and this
+			// person holds audit-read somewhere.
+			"audit": s.auditLog != nil && s.auditLog.Source() != auditlog.SourceNone &&
+				!s.auditScope(user).Empty(),
 		},
 	})
 }

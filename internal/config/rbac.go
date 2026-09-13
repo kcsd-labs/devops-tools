@@ -35,6 +35,11 @@ const (
 	OpSecretUpdate  = "secret-update"
 	OpSecretDelete  = "secret-delete"
 
+	// Granted per namespace to see what happened there — everyone's actions,
+	// not only the holder's — and globally for the entries that belong to no
+	// namespace: sign-ins, and who was granted what.
+	OpAuditRead = "audit-read"
+
 	// Not tied to a namespace: granted through RoleSpec.Global.
 	OpUserList   = "user-list"
 	OpUserManage = "user-manage"
@@ -65,6 +70,12 @@ func Operations(c *Config) []string {
 		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
 		OpUserList, OpUserManage,
+	}
+	// The audit trail is read back from Loki, or from the service's own pod
+	// logs when there is no Loki. With neither there is nothing to show, and a
+	// permission for a page that cannot answer is worse than no permission.
+	if c.Logs.LokiURL != "" || c.Cluster.InCluster {
+		ops = append(ops, OpAuditRead)
 	}
 	if c.Configs.Enabled() {
 		ops = append(ops, OpConfigRead, OpConfigWrite)

@@ -300,6 +300,16 @@ config:
 
   logs:
     lokiURL: "" # http://loki.monitoring.svc.cluster.local:3100
+    # How far back the Audit page offers to look. Loki reports neither its
+    # retention nor its max_query_length, so the limit is stated here and shown
+    # in the interface rather than found by hitting it. Without Loki the page
+    # falls back to this service's own pod logs, which reach back hours.
+    horizon: 720h
+    # Where events older than the horizon can be found, if anywhere. Shown at
+    # the end of a period, so that "no more entries" does not read as "there
+    # were none". A depository keeping audit for years will point at its SIEM.
+    archiveNote: "" # e.g. "Older events are kept in the SIEM."
+    archiveURL: ""
 
   # The Configurations page: the service configuration held in Consul's
   # key/value store. Disabled by default — the page does not exist, and its
@@ -363,6 +373,11 @@ rbacConfig:
   # hand beside the constants in the code drifts, and both directions are quiet
   # — a name the code never checks becomes a grant that does nothing, and a name
   # it does check but the list omits cannot be granted at all.
+
+  # One of them is worth a word: audit-read shows everything that happened in a
+  # namespace, whoever did it, including which secrets were opened. That is the
+  # point of it — otherwise "who restarted my service" has no answer — but it is
+  # not something to fold into a general developer role without deciding to.
 
   roles:
     platform-admin:

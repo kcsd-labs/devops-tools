@@ -12,6 +12,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [roles, setRoles] = useState<string[]>([]);
   const [canSeeUsers, setCanSeeUsers] = useState(false);
   const [canSeeConfigs, setCanSeeConfigs] = useState(false);
+  const [canSeeAudit, setCanSeeAudit] = useState(false);
   const [version, setVersion] = useState("");
   const [theme, setTheme] = useState<"dark" | "light">(
     () => (localStorage.getItem("devops-tools.theme") as "dark" | "light") ?? "dark"
@@ -40,6 +41,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         setRoles(m.roles ?? []);
         setCanSeeUsers(m.capabilities?.users ?? false);
         setCanSeeConfigs(m.capabilities?.configurations ?? false);
+        setCanSeeAudit(m.capabilities?.audit ?? false);
         setVersion(m.version ?? "");
       })
       .catch(() => {});
@@ -91,17 +93,32 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Administering the portal sits apart from working in it: everything
             above is about workloads, this is about who may touch them. */}
-        {canSeeUsers && (
+        {(canSeeUsers || canSeeAudit) && (
           <nav className="nav nav-admin">
-            <NavLink
-              to="/access/users"
-              className={() =>
-                "nav-item" + (location.pathname.startsWith("/access") ? " active" : "")
-              }
-            >
-              <span>Access management</span>
-              <span className="chev">›</span>
-            </NavLink>
+            {canSeeUsers && (
+              <NavLink
+                to="/access/users"
+                className={() =>
+                  "nav-item" + (location.pathname.startsWith("/access") ? " active" : "")
+                }
+              >
+                <span>Access management</span>
+                <span className="chev">›</span>
+              </NavLink>
+            )}
+            {/* The trail covers every operation, not only access, so it sits
+                beside the access screens rather than inside them. */}
+            {canSeeAudit && (
+              <NavLink
+                to="/audit"
+                className={() =>
+                  "nav-item" + (location.pathname.startsWith("/audit") ? " active" : "")
+                }
+              >
+                <span>Audit</span>
+                <span className="chev">›</span>
+              </NavLink>
+            )}
           </nav>
         )}
 

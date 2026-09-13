@@ -181,6 +181,18 @@ logs:
   lokiURL: ""
   # e.g. http://loki.monitoring.svc.cluster.local:3100
 
+  # How far back the Audit page offers to look. Loki reports neither its
+  # retention nor its max_query_length, so the limit is stated here and shown in
+  # the interface rather than found by hitting it. Without Loki the page reads
+  # this service's own pod logs instead, which reach back hours.
+  horizon: 720h
+
+  # Where events older than the horizon can be found, if anywhere. Shown at
+  # the end of a period, so that "no more entries" does not read as "there
+  # were none". A depository keeping audit for years will point at its SIEM.
+  archiveNote: "" # e.g. "Older events are kept in the SIEM."
+  archiveURL: ""
+
 # --- Access model -----------------------------------------------------------
 # Seeds an empty store on the very first start, and is then left alone: roles
 # are edited in the portal, under Access management, and kept on the volume.

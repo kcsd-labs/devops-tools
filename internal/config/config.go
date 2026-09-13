@@ -365,6 +365,15 @@ type MetricsConfig struct {
 // Kubernetes logs available.
 type LogsConfig struct {
 	LokiURL string `yaml:"lokiURL"`
+	// Horizon is how far back the audit page offers to look. Loki reports
+	// neither its retention nor its max_query_length, so the limit is stated
+	// here and shown in the interface rather than discovered by hitting it.
+	Horizon time.Duration `yaml:"horizon"`
+	// ArchiveNote and ArchiveURL say where events older than the horizon went,
+	// shown when a reader reaches the end of what is kept here. Somewhere
+	// they are kept for years, and "that is all there is" would be a lie.
+	ArchiveNote string `yaml:"archiveNote"`
+	ArchiveURL  string `yaml:"archiveURL"`
 }
 
 // ConfigsConfig turns on the Configurations page and says where the service

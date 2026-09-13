@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"devops-tools/internal/audit"
+	"devops-tools/internal/auditlog"
 	"devops-tools/internal/auth"
 	"devops-tools/internal/config"
 	"devops-tools/internal/configsource"
@@ -69,6 +70,9 @@ type Server struct {
 	loki       *loki.Client        // nil when Loki is not configured
 	configs    configsource.Source // nil when configuration management is off
 	gitlab     *gitlab.Client      // nil when rebuilding images is off
+	// auditLog reads the trail back. Nil, or reporting no source, when the
+	// deployment has neither Loki nor a cluster to read its own pod logs from.
+	auditLog *auditlog.Reader
 }
 
 func NewServer(
@@ -95,6 +99,12 @@ func (s *Server) Operations() []string { return s.operations }
 // WithOperations records the deployment's operation vocabulary.
 func (s *Server) WithOperations(ops []string) *Server {
 	s.operations = ops
+	return s
+}
+
+// WithAuditLog gives the server a reader for the audit trail.
+func (s *Server) WithAuditLog(r *auditlog.Reader) *Server {
+	s.auditLog = r
 	return s
 }
 
@@ -127,6 +137,10 @@ func (s *Server) Router() http.Handler {
 		r.Get("/namespaces", s.handleNamespaces)
 		r.Get("/users", s.requireGlobalOp(OpUserList, s.handleUsers))
 		r.Get("/roles", s.requireGlobalOp(OpUserList, s.handleListRoles))
+
+		// The audit trail. Gated inside the handler, not by requireOp: what a
+		// caller sees depends on which namespaces they hold audit-read in.
+		r.Get("/audit", s.handleAuditLog)
 
 		// Changing who can do what is a separate power from seeing it.
 		r.Post("/users", s.requireGlobalOp(OpUserManage, s.handleCreateUser))
