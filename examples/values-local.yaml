@@ -1,0 +1,72 @@
+# DevOps Tools with accounts kept by the portal itself.
+#
+#   helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
+#     --namespace devops-tools --create-namespace -f values-local.yaml
+#
+# No directory and no identity provider: an administrator signs in with the
+# password below and creates the rest under Access management, where a password
+# is typed rather than hashed by hand. The quickest way to try the portal, and
+# the one to use where there is nothing to authenticate against.
+#
+# Set here is what a local install has to decide. Commented lines are the
+# alternatives to each choice; everything not mentioned keeps its default and is
+# documented in charts/devops-tools/values.yaml.
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # Live log streaming needs buffering off, or the browser sees nothing until
+    # the connection closes.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: devops-tools.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  # tls:
+  #   - secretName: devops-tools-tls
+  #     hosts:
+  #       - devops-tools.example.com
+
+config:
+  auth:
+    provider: local
+
+    bootstrapAdmins:
+      # The account that always holds these roles, whatever the portal's own
+      # model says. The way back in if access is misconfigured.
+      users: [admin]
+      roles: [platform-admin]
+
+      passwordLogin:
+        username: admin
+        # Minimum 8 characters. Empty, the service refuses to start — nothing
+        # here ships a default one, because a password published in a
+        # repository is a known password rather than a weak one.
+        password: ""
+        passwordSecret:
+          name: ""
+          key: DEVOPS_TOOLS_BOOTSTRAP_PASSWORD
+        # Or, instead of either of the two above, a bcrypt hash — where even
+        # the Secret should not hold something readable.
+        # passwordHash: ""
+
+    # Accounts created in the portal live in the store with everyone else.
+    # Seeding them here is possible and needs a bcrypt hash:
+    #
+    #   docker run --rm 1kcsd/devops-tools hash-password 'your-password'
+    #
+    # local:
+    #   users:
+    #     - username: ci
+    #       email: ci@example.com
+    #       passwordHash: "$2a$10$..."
+    #       roles: [platform-admin]
+
+  # Optional. Left empty, the graphs and the historical log tab do not appear.
+  metrics:
+    prometheusURL: ""
+  logs:
+    lokiURL: ""

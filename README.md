@@ -193,33 +193,25 @@ untouched, so the change can be undone by setting the backend back.
 
 ## Install
 
-The image and the chart are both published:
+The image and the chart are both published. Start from an example values file —
+one per way of signing in:
 
 ```bash
 helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
   --namespace devops-tools --create-namespace \
-  --set config.auth.bootstrapAdmins.passwordLogin.password='pick-something'
+  -f values-local.yaml
 ```
 
-### With a values file
-
-The line above is a bare install with `local` accounts. Everything past it — a
-directory, an identity provider, an ingress, a storage class — belongs in a
-file rather than a growing list of `--set` flags:
-
-```bash
-helm install devops-tools oci://registry-1.docker.io/1kcsd/devops-tools \
-  --namespace devops-tools --create-namespace \
-  -f values-ldap.yaml
-```
-
-Two minimal ones to start from:
-
-- [`examples/values-ldap.yaml`](examples/values-ldap.yaml) — Active Directory or OpenLDAP over LDAPS
+- [`examples/values-local.yaml`](examples/values-local.yaml) — accounts kept by the portal itself, with nothing else to install
+- [`examples/values-ldap.yaml`](examples/values-ldap.yaml) — Active Directory or OpenLDAP
 - [`examples/values-oidc.yaml`](examples/values-oidc.yaml) — Keycloak, and anything else speaking OpenID Connect
 
-Both leave the administrator password empty, to be filled in or replaced by the
-name of a Secret that holds it.
+Each is minimal and commented, and each leaves the administrator password empty,
+to be filled in or replaced by the name of a Secret that holds it.
+
+A file rather than a growing list of `--set` flags, because everything past the
+first sign-in — a directory, an identity provider, an ingress — is easier to
+read, review and keep than a command line.
 
 ### Building it yourself
 
@@ -232,7 +224,7 @@ itself `dev`.
 git clone https://github.com/kcsd-labs/devops-tools
 cd devops-tools
 
-VERSION=0.25.3
+VERSION=0.25.4
 docker build --build-arg VERSION=$VERSION -t registry.example.com/devops-tools:$VERSION .
 docker push registry.example.com/devops-tools:$VERSION
 

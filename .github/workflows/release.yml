@@ -80,35 +80,45 @@ jobs:
         run: |
           # Quoted heredoc: the code fences below would otherwise be read as
           # command substitution. Values go in afterwards.
-          cat > notes.md <<'NOTES'
-          Image: `__IMAGE__:__APP__`
-          Chart version: `__CHART__`
+          cat > install.md <<'INSTALL'
 
           ## Install
 
-          ```bash
-          helm install devops-tools __REGISTRY__/devops-tools --version __CHART__ \
-            --namespace devops-tools --create-namespace \
-            --set config.auth.bootstrapAdmins.passwordLogin.password=SOMETHING
-          ```
-
-          That is a bare install with `local` accounts. For a directory or an
-          identity provider, start from an example values file:
+          Start from an example values file — one per way of signing in:
 
           ```bash
-          curl -O https://raw.githubusercontent.com/__REPO__/__TAG__/examples/values-ldap.yaml
-          # fill it in, then
+          curl -O https://raw.githubusercontent.com/__REPO__/__TAG__/examples/values-local.yaml
+          # fill in the administrator password, then
           helm install devops-tools __REGISTRY__/devops-tools --version __CHART__ \
             --namespace devops-tools --create-namespace \
-            -f values-ldap.yaml
+            -f values-local.yaml
           ```
 
-          `examples/values-oidc.yaml` is the same for Keycloak and anything else
+          `values-local.yaml` keeps accounts in the portal itself, with nothing
+          else to install. `values-ldap.yaml` is for Active Directory or
+          OpenLDAP, and `values-oidc.yaml` for Keycloak and anything else
           speaking OpenID Connect.
-          NOTES
 
-          sed -i "s|__IMAGE__|$IMAGE|g; s|__APP__|$APP|g" notes.md
-          sed -i "s|__CHART__|$CHART|g; s|__REGISTRY__|$CHART_REGISTRY|g" notes.md
-          sed -i "s|__REPO__|$REPO|g; s|__TAG__|$GITHUB_REF_NAME|g" notes.md
+          The administrator password is the one thing an install has to decide:
+          nothing here ships a default, so with none set the service stops at
+          startup rather than coming up as a portal anybody could walk into.
+          INSTALL
+
+          sed -i "s|__CHART__|$CHART|g; s|__REGISTRY__|$CHART_REGISTRY|g" install.md
+          sed -i "s|__REPO__|$REPO|g; s|__TAG__|$GITHUB_REF_NAME|g" install.md
+
+          # The changelog entry for this version, so that the notes say what
+          # changed rather than only how to install it. Written by hand in
+          # CHANGELOG.md: a list of commit subjects is not the same thing.
+          {
+            printf 'Image: `%s:%s`\nChart version: `%s`\n\n## What changed\n\n' "$IMAGE" "$APP" "$CHART"
+            awk -v want="## $APP" '$0 == want {found=1; next} /^## / {found=0} found' CHANGELOG.md
+            cat install.md
+          } > notes.md
+
+          if ! grep -q '^- ' notes.md; then
+            echo "CHANGELOG.md has no section for $APP; add one before tagging."
+            exit 1
+          fi
           cat notes.md
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
