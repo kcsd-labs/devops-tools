@@ -59,3 +59,95 @@ func TestAuditReadIsOfferedOnlyWhenThereIsATrailToRead(t *testing.T) {
 		t.Error("audit-read was not offered although the service can read its own pod logs")
 	}
 }
+
+func TestAGrantForASwitchedOffFeatureDoesNotBreakStartup(t *testing.T) {
+	// The shipped roles mention audit-read. An installation with neither Loki
+	// nor a cluster to read its own logs in has no audit page — and must still
+	// start, rather than refusing on a grant it simply cannot use.
+	off := &Config{}
+	r := &RBACConfig{
+		Operations: Operations(off),
+		Roles: map[string]RoleSpec{
+			"platform-admin": {
+				Namespaces: []NamespaceGrant{{Namespace: "*", Operations: []string{"*"}}},
+				Global:     []string{OpUserList, OpUserManage, OpAuditRead},
+			},
+		},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("a grant for a disabled feature was refused: %v", err)
+	}
+
+	// A name no build has ever known is still a typo, and still refused.
+	r.Roles["platform-admin"] = RoleSpec{Global: []string{"audit-reed"}}
+	if err := r.Validate(); err == nil {
+		t.Fatal("a misspelled operation was accepted")
+	}
+}
+
+func TestTheStorageBackendIsChecked(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Storage: StorageConfig{Path: "/data/devops-tools.json"},
+			Cluster: ClusterConfig{InCluster: true},
+			Auth: AuthConfig{
+				Provider: ProviderLocal,
+				Bootstrap: BootstrapConfig{
+					Users: []string{"admin"},
+					Roles: []string{"platform-admin"},
+					PasswordLogin: BootstrapLogin{
+						Username:     "admin",
+						PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("empty means file, so older configurations keep working", func(t *testing.T) {
+		if err := base().Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("a misspelled backend is refused", func(t *testing.T) {
+		c := base()
+		c.Storage.Backend = "kubernets"
+		if err := c.Validate(); err == nil {
+			t.Fatal("accepted")
+		}
+	})
+
+	t.Run("the Kubernetes backend needs a cluster", func(t *testing.T) {
+		c := base()
+		c.Storage.Backend = StorageKubernetes
+		c.Cluster.InCluster = false
+		if err := c.Validate(); err == nil {
+			t.Fatal("accepted: outside a cluster there is no Secret to keep the model in")
+		}
+	})
+}
+
+func TestEveryOperationBelongsToASection(t *testing.T) {
+	// The role editor draws its checkboxes from these three lists. An operation
+	// in none of them exists in the code, can be granted by editing the store by
+	// hand, and has no checkbox — which is exactly how audit-read and
+	// access-restore were each unreachable for a while.
+	sections := map[string]bool{}
+	for _, group := range [][]string{NamespaceOperations(), GlobalOperations(), ConfigOperations()} {
+		for _, op := range group {
+			sections[op] = true
+		}
+	}
+
+	full := &Config{
+		Logs:         LogsConfig{LokiURL: "http://loki:3100"},
+		Configs:      ConfigsConfig{Consul: ConsulSourceConfig{Enabled: true, Address: "http://consul:8500"}},
+		ImageRebuild: ImageRebuildConfig{Enabled: true},
+	}
+	for _, op := range Operations(full) {
+		if !sections[op] {
+			t.Errorf("%q is offered but belongs to no section of the role editor", op)
+		}
+	}
+}

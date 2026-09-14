@@ -71,12 +71,12 @@ func TestParseImage(t *testing.T) {
 // outcome worse than doing nothing.
 func TestForeignTagsAreRefusedRatherThanInterpreted(t *testing.T) {
 	refused := []string{
-		"docker.io/library/postgres:16.2",    // no environment prefix
+		"docker.io/library/postgres:16.2",           // no environment prefix
 		"registry.example.com/g/p/svc:latest",       // no pipeline, no environment
 		"registry.example.com/g/p/svc:staging-4321", // an environment we do not know
 		"registry.example.com/g/p/svc:dev-nightly",  // nothing numeric at the end
 		"registry.example.com/g/p/svc",              // no tag at all
-		"postgres:16",                        // no path to be a project
+		"postgres:16",                               // no path to be a project
 	}
 	for _, image := range refused {
 		if ref, err := ParseImage(image, conv); err == nil {

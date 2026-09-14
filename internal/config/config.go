@@ -248,9 +248,9 @@ func (o OIDCConfig) RequiresAuthorizedParty() bool {
 
 // BootstrapConfig is the grant that the portal's own model cannot take away.
 //
-// Every other role is assigned in the UI and stored on the volume, which leaves
-// one way to fail badly: a mistake there, or a lost volume, and nobody can sign
-// in to fix it. These users always hold these roles, and only a change to the
+// Every other role is assigned in the UI and kept in the store, which leaves one
+// way to fail badly: a mistake there, or a store that is lost, and nobody can
+// sign in to fix it. These users always hold these roles, and only a change to the
 // deployment can alter that.
 type BootstrapConfig struct {
 	Users []string `yaml:"users"`
@@ -297,9 +297,9 @@ func (b BootstrapConfig) Grants(username string) bool {
 //
 // The name is a setting rather than a string in the code because an
 // installation elsewhere will want its own — and because the technical
-// identity (module, chart, image, environment variables, the volume) has to
-// stay put regardless: renaming that would rename the PersistentVolumeClaim,
-// and the access model with it.
+// identity (module, chart, image, environment variables, the objects the model
+// lives in) has to stay put regardless: renaming that renames the Secret, or the
+// PersistentVolumeClaim, and takes the access model with it.
 type UIConfig struct {
 	// BrandName appears in the sidebar, on the sign-in screen and in the
 	// browser tab. Defaults to DevOps Tools.
@@ -328,8 +328,42 @@ func (u UIConfig) Initials() string {
 // StorageConfig is where the runtime-editable part of the access model lives.
 type StorageConfig struct {
 	// Path is a JSON file, normally on a persistent volume. Losing it loses
-	// every role assignment made in the UI.
+	// every role assignment made in the UI. Used by the file backend.
 	Path string `yaml:"path"`
+
+	// Backend is where the model is kept: "file" or "kubernetes". Empty means
+	// file, so a configuration written before this existed keeps working.
+	//
+	// The Kubernetes backend keeps it in a Secret, which is what lets more than
+	// one replica share one model — a file on a ReadWriteOnce volume cannot be
+	// mounted twice. Outside a cluster it is not available, and the file stays.
+	Backend string `yaml:"backend"`
+
+	// SecretName is the object the Kubernetes backend uses. Empty falls back to
+	// a name derived from nothing — the chart supplies it.
+	SecretName string `yaml:"secretName"`
+}
+
+// Storage backends.
+const (
+	StorageFile       = "file"
+	StorageKubernetes = "kubernetes"
+)
+
+// Kind reports the backend to use, with the default filled in.
+func (c StorageConfig) Kind() string {
+	if c.Backend == "" {
+		return StorageFile
+	}
+	return c.Backend
+}
+
+// SecretNameOr returns the configured object name, or the fallback.
+func (c StorageConfig) SecretNameOr(fallback string) string {
+	if c.SecretName == "" {
+		return fallback
+	}
+	return c.SecretName
 }
 
 // ClusterConfig selects how to reach the Kubernetes API.
@@ -638,6 +672,21 @@ func checkBcryptHash(h string) error {
 
 // Validate catches misconfiguration at startup rather than on first login.
 func (c *Config) Validate() error {
+	switch c.Storage.Kind() {
+	case StorageFile:
+		if c.Storage.Path == "" {
+			return fmt.Errorf("storage.path is empty and the model is kept in a file")
+		}
+	case StorageKubernetes:
+		if !c.Cluster.InCluster {
+			return fmt.Errorf("storage.backend=kubernetes needs to run in a cluster; " +
+				"outside one, keep the access model in a file")
+		}
+	default:
+		return fmt.Errorf("unknown storage.backend %q (expected %s or %s)",
+			c.Storage.Backend, StorageFile, StorageKubernetes)
+	}
+
 	switch c.Auth.Provider {
 	case ProviderLocal:
 		// An empty user list used to be refused outright, which forced every

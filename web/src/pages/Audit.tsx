@@ -59,6 +59,10 @@ export function Audit() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string>("");
+  // The server answers newest first. Turning the page around is a reading
+  // choice — following a sequence of actions forward reads better the other
+  // way — so it is done here, over what is already loaded.
+  const [newestFirst, setNewestFirst] = useState(true);
 
   // Applied, not typed: the query goes to the server, so reloading on every
   // keystroke would be a request per character.
@@ -100,6 +104,12 @@ export function Audit() {
   };
 
   const empty = !loading && !error && entries.length === 0;
+  const shown = [...entries].sort((a, b) => {
+    // Compared as instants, not as strings: the timestamps carry a variable
+    // number of fractional digits, and "…22Z" sorts before "…22.5Z".
+    const d = new Date(a.time).getTime() - new Date(b.time).getTime();
+    return newestFirst ? -d : d;
+  });
 
   return (
     <div className="page">
@@ -183,7 +193,15 @@ export function Audit() {
         <table className="table">
           <thead>
             <tr>
-              <th>Time</th>
+              <th>
+                <button
+                  className="th-sort"
+                  onClick={() => setNewestFirst((v) => !v)}
+                  title={newestFirst ? "Oldest first" : "Newest first"}
+                >
+                  Time {newestFirst ? "↓" : "↑"}
+                </button>
+              </th>
               <th>User</th>
               <th>Operation</th>
               <th>Namespace</th>
@@ -192,7 +210,7 @@ export function Audit() {
             </tr>
           </thead>
           <tbody>
-            {entries.map((e, i) => {
+            {shown.map((e, i) => {
               const id = `${e.time}-${i}`;
               // Refused and failed are different things: one is the access
               // model saying no, the other is the cluster.

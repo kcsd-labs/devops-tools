@@ -329,6 +329,22 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+/* A column header that sorts. It looks like the other headers on purpose: the
+   arrow is the affordance, so turning one header into a control does not make
+   it the loudest thing in the table. */
+.th-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.th-sort:hover {
+  color: var(--text);
+}
 .table tr:last-child td {
   border-bottom: none;
 }

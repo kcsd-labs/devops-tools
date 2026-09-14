@@ -18,16 +18,19 @@ import (
 // Reports whether it seeded, so the caller can say which of the two is in
 // force rather than leaving an operator to guess.
 func (s *Store) SeedRoles(cfg *config.RBACConfig) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if len(s.roles) > 0 {
-		return false, nil
-	}
-	for name, spec := range cfg.Roles {
-		s.roles[name] = spec
-	}
-	return true, s.save()
+	seeded := false
+	err := s.mutate(func() error {
+		seeded = false // assigned, not accumulated: this may run twice
+		if len(s.roles) > 0 {
+			return errNoChange
+		}
+		for name, spec := range cfg.Roles {
+			s.roles[name] = spec
+		}
+		seeded = true
+		return nil
+	})
+	return seeded, err
 }
 
 // AccessModel builds the model the authorizer answers from. Operations come
@@ -68,10 +71,10 @@ func (s *Store) SaveRole(name string, spec config.RoleSpec) error {
 	if err := ValidateUsername(name); err != nil {
 		return fmt.Errorf("role name: %w", err)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.roles[name] = spec
-	return s.save()
+	return s.mutate(func() error {
+		s.roles[name] = spec
+		return nil
+	})
 }
 
 // DeleteRole removes a role, and with it every grant it carried.
@@ -80,25 +83,25 @@ func (s *Store) SaveRole(name string, spec config.RoleSpec) error {
 // does not exist grants nothing — but the caller is told who they are, so an
 // administrator finds out now rather than when someone reports losing access.
 func (s *Store) DeleteRole(name string) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.roles[name]; !ok {
-		return nil, fmt.Errorf("role %q: %w", name, ErrNotFound)
-	}
-	delete(s.roles, name)
-
 	var affected []string
-	for _, u := range s.users {
-		for _, r := range u.Roles {
-			if r == name {
-				affected = append(affected, u.Username)
-				break
+	err := s.mutate(func() error {
+		affected = nil // this may run twice; start from nothing each time
+		if _, ok := s.roles[name]; !ok {
+			return fmt.Errorf("role %q: %w", name, ErrNotFound)
+		}
+		delete(s.roles, name)
+		for _, u := range s.users {
+			for _, r := range u.Roles {
+				if r == name {
+					affected = append(affected, u.Username)
+					break
+				}
 			}
 		}
-	}
-	sort.Strings(affected)
-	return affected, s.save()
+		sort.Strings(affected)
+		return nil
+	})
+	return affected, err
 }
 
 // Membership is the outcome of changing who holds a role.
@@ -124,49 +127,48 @@ type Membership struct {
 // The whole batch is one lock and one save, so it cannot land half applied —
 // which a loop of single-user calls from the browser could.
 func (s *Store) ChangeRoleMembership(role string, usernames []string, add bool) (Membership, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.roles[role]; !ok {
-		return Membership{}, fmt.Errorf("role %q: %w", role, ErrNotFound)
-	}
-
 	var out Membership
-	for _, name := range usernames {
-		u, ok := s.users[key(name)]
-		if !ok {
-			out.Unknown = append(out.Unknown, name)
-			continue
+	err := s.mutate(func() error {
+		out = Membership{} // this may run twice; start from nothing each time
+		if _, ok := s.roles[role]; !ok {
+			return fmt.Errorf("role %q: %w", role, ErrNotFound)
 		}
-		had := false
-		kept := make([]string, 0, len(u.Roles)+1)
-		for _, r := range u.Roles {
-			if r == role {
-				had = true
+		for _, name := range usernames {
+			u, ok := s.users[key(name)]
+			if !ok {
+				out.Unknown = append(out.Unknown, name)
 				continue
 			}
-			kept = append(kept, r)
+			had := false
+			kept := make([]string, 0, len(u.Roles)+1)
+			for _, r := range u.Roles {
+				if r == role {
+					had = true
+					continue
+				}
+				kept = append(kept, r)
+			}
+			if add == had {
+				out.Unchanged = append(out.Unchanged, u.Username)
+				continue
+			}
+			if add {
+				kept = append(kept, role)
+			}
+			sort.Strings(kept)
+			u.Roles = kept
+			out.Changed = append(out.Changed, u.Username)
 		}
-		if add == had {
-			out.Unchanged = append(out.Unchanged, u.Username)
-			continue
-		}
-		if add {
-			kept = append(kept, role)
-		}
-		sort.Strings(kept)
-		u.Roles = kept
-		out.Changed = append(out.Changed, u.Username)
-	}
-	sort.Strings(out.Changed)
-	sort.Strings(out.Unchanged)
-	sort.Strings(out.Unknown)
+		sort.Strings(out.Changed)
+		sort.Strings(out.Unchanged)
+		sort.Strings(out.Unknown)
 
-	if len(out.Changed) == 0 {
-		// Nothing moved, so nothing to write.
-		return out, nil
-	}
-	return out, s.save()
+		if len(out.Changed) == 0 {
+			return errNoChange // nothing moved, so nothing to write
+		}
+		return nil
+	})
+	return out, err
 }
 
 // RoleHolders counts who holds each role, so the roles list can say how many

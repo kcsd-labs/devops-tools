@@ -8,6 +8,7 @@ import { Helm } from "./pages/Helm";
 import { Secrets } from "./pages/Secrets";
 import { Users } from "./pages/Users";
 import { Roles } from "./pages/Roles";
+import { Storage } from "./pages/Storage";
 import { MultiLogs } from "./pages/MultiLogs";
 import { Audit } from "./pages/Audit";
 import { Login } from "./pages/Login";
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/access" element={<Navigate to="/access/users" replace />} />
         <Route path="/access/users" element={<Users />} />
         <Route path="/access/roles" element={<Roles />} />
+        <Route path="/access/storage" element={<Storage />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,3 +1,27 @@
+{{- /*
+Moving the access model into a Secret happens on the first start with
+backend: kubernetes, and needs the file to still be mounted — that is where the
+model is read from. Dropping the volume in the same step would start the
+service on an empty model instead, and the roles would have to be handed out
+again.
+
+The check looks at the cluster, so `helm template` and `--dry-run` cannot see
+the Secret and will refuse an upgrade that is in fact fine. Run it for real.
+*/ -}}
+{{- if and .Release.IsUpgrade (eq (dig "storage" "backend" "kubernetes" .Values.config) "kubernetes") (not .Values.persistence.enabled) }}
+{{- $access := printf "%s-access" (include "devops-tools.fullname" .) }}
+{{- if not (lookup "v1" "Secret" .Release.Namespace $access) }}
+{{- fail (printf "%s does not exist yet, so the access model is still in the file on the volume. Upgrade once with persistence.enabled=true to copy it across, check that the roles are there, and only then turn the volume off." $access) }}
+{{- end }}
+{{- end }}
+{{- /*
+The file backend with no volume would put the access model on an emptyDir: it
+would work, right up to the first restart, and then everybody's roles would be
+gone with no error anywhere.
+*/ -}}
+{{- if and (eq (dig "storage" "backend" "kubernetes" .Values.config) "file") (not .Values.persistence.enabled) }}
+{{- fail "config.storage.backend: file keeps the access model in a file, which needs persistence.enabled: true — without a volume it would live in the pod and be lost on the next restart. Either turn the volume on, or leave the model in a Secret (backend: kubernetes)." }}
+{{- end }}
 {{- if and .Values.persistence.enabled (gt (int .Values.replicaCount) 1) }}
 {{- fail "persistence.enabled requires replicaCount: 1 — the access model is a file on a ReadWriteOnce volume, which a second replica cannot mount, and two replicas would overwrite each other's writes. Use an external identity provider and persistence.enabled=false if you need more than one." }}
 {{- end }}

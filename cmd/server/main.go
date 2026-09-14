@@ -56,14 +56,30 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	km, err := kube.NewManager(cfg.Cluster, cfg.Impersonation)
+	if err != nil {
+		fail("connect to kubernetes", err)
+	}
+
 	// The store holds who has signed in and what they were granted. Opening it
-	// before anything else means an unwritable volume stops the service here,
-	// with a clear reason, rather than at the first sign-in.
-	userStore, err := store.Open(cfg.Storage.Path)
+	// before serving means somewhere unwritable stops the service here, with a
+	// clear reason, rather than at the first sign-in.
+	backend, err := accessBackend(cfg, km)
+	if err != nil {
+		fail("set up the access store", err)
+	}
+	if moved, err := store.MigrateFile(ctx, cfg.Storage.Path, backend); err != nil {
+		fail("migrate the access model", err)
+	} else if moved {
+		slog.Info("the access model was copied out of the file and now lives in the cluster; "+
+			"the file is left untouched, so this can still be undone",
+			"from", cfg.Storage.Path, "to", backend.Describe())
+	}
+	userStore, err := store.OpenWith(backend)
 	if err != nil {
 		fail("open the access store", err)
 	}
-	slog.Info("access store ready", "path", cfg.Storage.Path, "users", userStore.Count())
+	slog.Info("access store ready", "store", backend.Describe(), "users", userStore.Count())
 
 	authSvc, err := auth.New(ctx, cfg.Auth, userStore)
 	if err != nil {
@@ -107,11 +123,6 @@ func main() {
 			"users", users)
 	}
 
-	km, err := kube.NewManager(cfg.Cluster, cfg.Impersonation)
-	if err != nil {
-		fail("connect to kubernetes", err)
-	}
-
 	if len(rbacCfg.Declared) > 0 {
 		// The list used to be written out in values, and keeping it in step with
 		// the code was left to whoever remembered. Now it is derived; saying so
@@ -123,7 +134,7 @@ func main() {
 
 	auditLog := audit.New()
 
-	// Roles are edited in the portal and kept on the volume. The `rbac` section
+	// Roles are edited in the portal and kept in the store. The `rbac` section
 	// of the configuration seeds an empty store and is then left alone —
 	// reapplying it on
 	// every start would undo, silently and without an error, whatever an
@@ -137,7 +148,7 @@ func main() {
 	} else {
 		slog.Info("access model loaded from the store; the `rbac` section of the configuration "+
 			"is not applied after the first start",
-			"roles", len(userStore.ListRoles()), "path", cfg.Storage.Path)
+			"roles", len(userStore.ListRoles()), "store", backend.Describe())
 		// Editing rbacConfig.roles on a running installation does nothing, and
 		// doing nothing quietly is how somebody spends an afternoon wondering
 		// why their upgrade had no effect. Naming what differs turns a silent
@@ -145,11 +156,24 @@ func main() {
 		if diff := unappliedRoles(rbacCfg, userStore); len(diff) > 0 {
 			slog.Warn("the `rbac` section names roles the store does not have, and it is not "+
 				"applied after the first start — roles are edited in the portal, under Access "+
-				"management, and live on the volume",
-				"only_in_configuration", diff, "path", cfg.Storage.Path)
+				"management, and kept in the store",
+				"only_in_configuration", diff, "store", backend.Describe())
 		}
 	}
 	authorizer := rbac.New(userStore.AccessModel(rbacCfg.Operations))
+
+	// With more than one replica the model changes without this one being
+	// asked. Following it is what makes a role revoked on another replica take
+	// effect here at once rather than at the next restart.
+	// "Last seen" is updated on every request and written in batches; without
+	// this the accumulated times would only reach the store on the next real
+	// change to the model.
+	userStore.KeepSeen(ctx)
+
+	userStore.Follow(ctx, func() {
+		authorizer.Replace(userStore.AccessModel(rbacCfg.Operations))
+		slog.Info("the access model changed elsewhere and was reloaded", "store", backend.Describe())
+	})
 
 	var promClient *prom.Client
 	if cfg.Metrics.PrometheusURL != "" {
@@ -233,7 +257,8 @@ func main() {
 	srv := api.NewServer(cfg, authorizer, km, auditLog, authSvc, userStore,
 		promClient, lokiClient, configs, rebuildClient).
 		WithOperations(rbacCfg.Operations).
-		WithAuditLog(trail)
+		WithAuditLog(trail).
+		WithSelf(id)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Addr,
@@ -292,4 +317,26 @@ func unappliedRoles(cfg *config.RBACConfig, st *store.Store) []string {
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+// accessBackend picks where the access model lives.
+//
+// A Secret is what lets several replicas share one model; a file is what works
+// outside a cluster, and what an installation forbidden from writing objects
+// keeps using. The namespace comes from the downward API rather than the
+// configuration: an object this service writes belongs beside it.
+func accessBackend(cfg *config.Config, km *kube.Manager) (store.Backend, error) {
+	if cfg.Storage.Kind() == config.StorageFile {
+		return store.NewFileBackend(cfg.Storage.Path), nil
+	}
+	namespace := os.Getenv("DEVOPS_TOOLS_POD_NAMESPACE")
+	if namespace == "" {
+		return nil, fmt.Errorf("storage.backend=kubernetes needs DEVOPS_TOOLS_POD_NAMESPACE, " +
+			"which the chart supplies from the downward API")
+	}
+	cs, err := km.Clientset("")
+	if err != nil {
+		return nil, err
+	}
+	return store.NewSecretBackend(cs, namespace, cfg.Storage.SecretNameOr("devops-tools-access")), nil
 }

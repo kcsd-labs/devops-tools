@@ -1,6 +1,9 @@
 package store
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,4 +168,92 @@ func TestRefusesANewerFormat(t *testing.T) {
 
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+func TestGroupNamesAreStoredOnce(t *testing.T) {
+	// The same team, written out once per member, is what made the document ten
+	// times larger than it needed to be.
+	team := []string{
+		"CN=Infrastructure,OU=Groups,OU=Departments,DC=corp,DC=example,DC=com",
+		"CN=Payments,OU=Groups,OU=Departments,DC=corp,DC=example,DC=com",
+	}
+	users := map[string]*User{}
+	for i := 0; i < 50; i++ {
+		name := fmt.Sprintf("user%02d", i)
+		users[name] = &User{Username: name, Provider: "ldap", Groups: team}
+	}
+
+	f := encodeFile(users, nil, nil)
+	if len(f.Groups) != 2 {
+		t.Fatalf("the table holds %d names, want the two distinct ones", len(f.Groups))
+	}
+	for _, u := range f.Users {
+		if len(u.Groups) != 0 {
+			t.Fatal("a user still carries the names themselves")
+		}
+		if len(u.GroupIDs) != 2 {
+			t.Fatalf("a user has %d indices, want 2", len(u.GroupIDs))
+		}
+	}
+}
+
+func TestTheSameModelEncodesToTheSameBytes(t *testing.T) {
+	// Otherwise every write would look like a change to whoever is watching the
+	// object, and two replicas would chase each other.
+	users := map[string]*User{
+		"anna":  {Username: "anna", Groups: []string{"CN=b,DC=x", "CN=a,DC=x"}},
+		"boris": {Username: "boris", Groups: []string{"CN=a,DC=x"}},
+	}
+	first, err := json.Marshal(encodeFile(users, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		again, err := json.Marshal(encodeFile(users, nil, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(first, again) {
+			t.Fatal("encoding the same model twice gave different bytes")
+		}
+	}
+}
+
+func TestAStoreWrittenByTheOlderFormatStillOpens(t *testing.T) {
+	// Version 2 wrote the group names into each user. An upgrade must read that
+	// and carry it across, not lose everybody's context.
+	path := t.TempDir() + "/access.json"
+	old := `{"version":2,"users":{"anna":{"username":"anna","provider":"ldap",` +
+		`"groups":["CN=Payments,DC=x","CN=Infrastructure,DC=x"],"roles":["readonly"],` +
+		`"firstSeen":"2026-01-01T00:00:00Z","lastSeen":"2026-01-02T00:00:00Z"}}}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.GroupsFor("anna"); len(got) != 2 {
+		t.Fatalf("groups after reading the older format: %v", got)
+	}
+
+	// And the next write puts it in the current format.
+	if err := s.SetRoles("anna", []string{"platform-admin"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f file
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	if f.Version != currentVersion || len(f.Groups) != 2 {
+		t.Fatalf("rewritten as version %d with %d group names", f.Version, len(f.Groups))
+	}
+	if got := s.GroupsFor("anna"); len(got) != 2 {
+		t.Fatalf("groups were lost in the rewrite: %v", got)
+	}
 }

@@ -37,6 +37,35 @@ export interface Capabilities {
   configurations: boolean;
   /** A trail can be read at all, AND the caller holds audit-read somewhere. */
   audit: boolean;
+  /** May take a snapshot of the access model, and put one back. */
+  accessRestore: boolean;
+}
+
+/** Where the access model lives, and how much of it there is. */
+export interface StorageStat {
+  /** "secret <namespace>/<name>" or "file <path>". */
+  backend: string;
+  /** What the model occupies where it is kept — the number the limit applies
+      to, and smaller than `raw` once the backend starts compressing. */
+  bytes: number;
+  /** The document before the backend packed it. Equal to `bytes` while nothing
+      is being compressed. */
+  raw: number;
+  /** The backend's ceiling, or 0 where it has none worth showing. */
+  limit: number;
+  users: number;
+  withRole: number;
+  roles: number;
+  schema: number;
+  /** This replica's copy is the stored one. False means a change landed
+      elsewhere and has not arrived here yet. */
+  current: boolean;
+  /** When this replica last wrote. Absent if it has not since it started. */
+  lastWrite?: string;
+  /** Pods serving this release. Absent outside a cluster. */
+  replicas?: number;
+  /** Whether this caller may take a snapshot or put one back. */
+  mayRestore: boolean;
 }
 
 /** One recorded action. */
@@ -292,11 +321,34 @@ export function createApi(token: string | undefined) {
       return getJSON<AuditPage>("/audit" + (qs ? `?${qs}` : ""));
     },
 
+    storage: () => getJSON<StorageStat>("/access/storage"),
+    /** The model as a file, for keeping or for moving to another environment. */
+    snapshot: async (): Promise<Blob> =>
+      handle(await fetch("/api/access/snapshot", { headers })).then((r) => r.blob()),
+    /** Replace the whole model. The body is the snapshot itself, not a wrapper. */
+    restore: async (snapshot: string): Promise<{ users: number; roles: number }> =>
+      handle(
+        await fetch("/api/access/snapshot", {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: snapshot,
+        })
+      ).then((r) => r.json()),
+
     users: () => getJSON<PortalUser[]>("/users"),
     roles: () =>
       getJSON<{
         roles: Role[];
+        /** What this deployment offers, with the switched-off features left out. */
         operations: string[];
+        /** Which section of the editor each one belongs in. Sent by the server
+            rather than known here: a copy of it here went stale twice, and both
+            times a permission ended up with no checkbox at all. An operation
+            can be in two of these — audit-read means different things per
+            namespace and globally. */
+        namespaceOperations: string[];
+        globalOperations: string[];
+        configurationOptions: string[];
         /** How many people hold each role, by role name. */
         holders?: Record<string, number>;
       }>("/roles"),

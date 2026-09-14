@@ -19,6 +19,12 @@ export function AccessTabs() {
       <NavLink to="/access/roles" className={() => on("/access/roles")}>
         Roles
       </NavLink>
+      {/* Where the two above are kept. The third tab rather than a page of its
+          own because the access model is the only state this service owns —
+          there is nothing else for a storage screen to be about. */}
+      <NavLink to="/access/storage" className={() => on("/access/storage")}>
+        Storage
+      </NavLink>
     </div>
   );
 }

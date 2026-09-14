@@ -102,6 +102,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			// person holds audit-read somewhere.
 			"audit": s.auditLog != nil && s.auditLog.Source() != auditlog.SourceNone &&
 				!s.auditScope(user).Empty(),
+			// The storage screen: visible with the users list, but the buttons
+			// on it need the stronger grant — see the handlers.
+			"accessRestore": s.authz.AllowedGlobal(user.Roles, OpAccessRestore),
 		},
 	})
 }

@@ -30,7 +30,7 @@ func bootstrapService(t *testing.T, username, password string) *Service {
 	}
 	return &Service{
 		kind:     config.ProviderOIDC,
-		limiter:  newLoginLimiter(),
+		limiter:  newLoginLimiter(nil),
 		sessions: sessions,
 		dir:      newDir(map[string][]string{}),
 		bootstrap: config.BootstrapConfig{
@@ -91,7 +91,7 @@ func TestBootstrapUsernameIsCaseInsensitive(t *testing.T) {
 // Not configured means not available — this must never be a way in that
 // appears by default.
 func TestBootstrapOffByDefault(t *testing.T) {
-	s := &Service{kind: config.ProviderOIDC, limiter: newLoginLimiter()}
+	s := &Service{kind: config.ProviderOIDC, limiter: newLoginLimiter(nil)}
 	if s.SupportsLogin() {
 		t.Fatal("password login is offered without being configured")
 	}

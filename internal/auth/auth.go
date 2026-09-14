@@ -102,9 +102,11 @@ type OIDCPublicInfo struct {
 // New builds the service for the configured provider. dir supplies roles and
 // records sign-ins.
 func New(ctx context.Context, cfg config.AuthConfig, dir Directory) (*Service, error) {
+	// A directory that can hold a lockout shares it with the other replicas.
+	shared, _ := dir.(Lockouts)
 	s := &Service{
 		kind:      cfg.Provider,
-		limiter:   newLoginLimiter(),
+		limiter:   newLoginLimiter(shared),
 		dir:       dir,
 		bootstrap: cfg.Bootstrap,
 	}
@@ -251,7 +253,7 @@ func (s *Service) register(u *User) {
 	}
 	if err := s.dir.RecordSeen(u.Username, u.Email, s.kind, u.Groups, u.Roles); err != nil {
 		// Not fatal: being unable to record the sighting must not stop someone
-		// signing in. It does mean the volume is unwritable, so say so loudly.
+		// signing in. It does mean the store is unwritable, so say so loudly.
 		slog.Error("record sign-in", "user", u.Username, "err", err)
 	}
 }

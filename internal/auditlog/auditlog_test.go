@@ -189,6 +189,40 @@ func TestTheChosenPeriodNarrowsButCannotWiden(t *testing.T) {
 	}
 }
 
+func TestAPageIsNewestFirstAcrossWindows(t *testing.T) {
+	// One page is assembled from several windows, walking backwards, and each
+	// window arrives oldest first. Without ordering the whole page the result
+	// is neither: blocks descending, rows inside them ascending.
+	line := func(t time.Time) string {
+		return `{"time":"` + t.UTC().Format(time.RFC3339) +
+			`","msg":"action","user":"i.petrov","namespace":"payments-dev",` +
+			`"operation":"logs","allowed":true,"success":true}` + "\n"
+	}
+	now := time.Now().UTC()
+	var log string
+	for _, h := range []int{2, 26, 50} { // one entry in each of three windows
+		log += line(now.Add(-time.Duration(h) * time.Hour))
+	}
+	r := &Reader{
+		self:    Self{Namespace: "devops-tools"},
+		pods:    &podSource{self: Self{Namespace: "devops-tools"}, lister: fakePods{pods: map[string]string{"a": log}}},
+		horizon: 72 * time.Hour,
+	}
+
+	page, err := r.Read(context.Background(), Scope{All: true}, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3 — one per window", len(page.Entries))
+	}
+	for i := 1; i < len(page.Entries); i++ {
+		if page.Entries[i].Time.After(page.Entries[i-1].Time) {
+			t.Fatalf("page is not newest first: %v", page.Entries)
+		}
+	}
+}
+
 func TestWithoutASourceTheReaderSaysSo(t *testing.T) {
 	r := New(Self{}, nil, nil, 0)
 	if r.Source() != SourceNone {

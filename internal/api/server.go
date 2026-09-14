@@ -3,7 +3,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -44,6 +46,8 @@ const (
 	OpSecretUpdate  = config.OpSecretUpdate
 	OpSecretDelete  = config.OpSecretDelete
 
+	OpAccessRestore = config.OpAccessRestore
+
 	OpUserList   = config.OpUserList
 	OpUserManage = config.OpUserManage
 
@@ -73,6 +77,9 @@ type Server struct {
 	// auditLog reads the trail back. Nil, or reporting no source, when the
 	// deployment has neither Loki nor a cluster to read its own pod logs from.
 	auditLog *auditlog.Reader
+	// self is how this service finds its own pods, for the one number on the
+	// storage screen that is not the store's to answer.
+	self kube.PodIdentity
 }
 
 func NewServer(
@@ -108,6 +115,25 @@ func (s *Server) WithAuditLog(r *auditlog.Reader) *Server {
 	return s
 }
 
+// WithSelf tells the server which pods are its own.
+func (s *Server) WithSelf(id kube.PodIdentity) *Server {
+	s.self = id
+	return s
+}
+
+// replicaCount is how many pods are serving this release. Only answerable in a
+// cluster, and only when the pod could identify itself.
+func (s *Server) replicaCount(ctx context.Context) (int, error) {
+	if s.self.Namespace == "" || s.self.Selector == "" {
+		return 0, fmt.Errorf("this service does not know which pods are its own")
+	}
+	pods, err := s.kube.OwnPods(ctx, s.self.Namespace, s.self.Selector)
+	if err != nil {
+		return 0, err
+	}
+	return len(pods), nil
+}
+
 // Router builds the chi router with every endpoint.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
@@ -141,6 +167,14 @@ func (s *Server) Router() http.Handler {
 		// The audit trail. Gated inside the handler, not by requireOp: what a
 		// caller sees depends on which namespaces they hold audit-read in.
 		r.Get("/audit", s.handleAuditLog)
+
+		// Where the access model lives. The state is readable by whoever may
+		// see the users list; taking a copy or putting one back is a separate
+		// power, because a snapshot carries password hashes and restoring one
+		// changes everybody's access at once.
+		r.Get("/access/storage", s.requireGlobalOp(OpUserList, s.handleStorageStat))
+		r.Get("/access/snapshot", s.requireGlobalOp(OpAccessRestore, s.handleSnapshot))
+		r.Put("/access/snapshot", s.requireGlobalOp(OpAccessRestore, s.handleRestore))
 
 		// Changing who can do what is a separate power from seeing it.
 		r.Post("/users", s.requireGlobalOp(OpUserManage, s.handleCreateUser))

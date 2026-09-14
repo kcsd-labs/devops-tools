@@ -13,6 +13,14 @@ deepCopy so that removing them affects what is written here and not the values
 themselves — the Secret and the deployment still have to see them.
 */ -}}
 {{- $config := deepCopy .Values.config -}}
+{{- /*
+The object holding the access model is named after the release unless somebody
+said otherwise — the service cannot work the name out for itself.
+*/ -}}
+{{- $storage := dig "storage" dict $config -}}
+{{- if and (eq (dig "backend" "kubernetes" $storage) "kubernetes") (not $storage.secretName) -}}
+{{- $_ := set $storage "secretName" (printf "%s-access" (include "devops-tools.fullname" .)) -}}
+{{- end -}}
 {{- $login := dig "auth" "bootstrapAdmins" "passwordLogin" dict $config -}}
 {{- $_ := unset $login "password" -}}
 {{- $_ = unset $login "passwordSecret" -}}

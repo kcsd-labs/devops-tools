@@ -15,6 +15,7 @@ export function Roles() {
   const api = useApi();
   const [roles, setRoles] = useState<Role[]>([]);
   const [operations, setOperations] = useState<string[]>([]);
+  const [sections, setSections] = useState<OpSections>({ namespace: [], global: [], config: [] });
   const [namespaces, setNamespaces] = useState<string[]>([]);
   // How many people hold each role. Read-only here on purpose: this page is
   // about what a role permits, and who holds it is decided under Users.
@@ -35,6 +36,11 @@ export function Roles() {
       .then(([r, m, ns]) => {
         setRoles(r.roles);
         setOperations(r.operations);
+        setSections({
+          namespace: r.namespaceOperations ?? [],
+          global: r.globalOperations ?? [],
+          config: r.configurationOptions ?? [],
+        });
         setHolders(r.holders ?? {});
         setMe(m);
         // Suggestions for the namespace field only. A role may name a namespace
@@ -187,6 +193,7 @@ export function Roles() {
         <RoleDialog
           role={editing}
           operations={operations}
+          sections={sections}
           namespaceOptions={namespaces}
           existingNames={roles.map((r) => r.name)}
           onClose={() => {
@@ -205,29 +212,29 @@ export function Roles() {
   );
 }
 
-// GLOBAL_OPS govern the portal itself rather than a workload, so the editor
-// lists them apart from the per-namespace ones.
-const GLOBAL_OPS = ["user-list", "user-manage"];
-
-// Configuration is granted by path rather than by namespace, so these are kept
-// out of the per-namespace list too. The block appears only where the
-// deployment declares them — an installation without the Configurations feature
-// simply leaves them out of its operations, and never sees the section.
-const CONFIG_OPS = ["config-read", "config-write"];
+// Which operation goes in which section of the editor comes from the server —
+// see the /roles response. Only the wording is decided here, and a name with no
+// wording is shown as it is rather than left out.
 
 const CONFIG_OP_LABELS: Record<string, string> = {
   "config-read": "view",
   "config-write": "edit",
 };
 
+/** Which section of the editor each operation belongs in, as the server says. */
+type OpSections = { namespace: string[]; global: string[]; config: string[] };
+
 const GLOBAL_OP_LABELS: Record<string, string> = {
   "user-list": "see users and roles",
   "user-manage": "create users, set passwords, change roles",
+  "audit-read": "read sign-ins and access changes in the audit log",
+  "access-restore": "download the access model, and replace it from a file",
 };
 
 function RoleDialog({
   role,
   operations,
+  sections,
   namespaceOptions,
   existingNames,
   onClose,
@@ -235,6 +242,7 @@ function RoleDialog({
 }: {
   role: Role | null;
   operations: string[];
+  sections: OpSections;
   namespaceOptions: string[];
   existingNames: string[];
   onClose: () => void;
@@ -255,8 +263,11 @@ function RoleDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const nsOps = operations.filter((o) => !GLOBAL_OPS.includes(o) && !CONFIG_OPS.includes(o));
-  const configOps = CONFIG_OPS.filter((o) => operations.includes(o));
+  // Each section shows what the deployment offers and the server places there.
+  const available = (group: string[]) => group.filter((o) => operations.includes(o));
+  const nsOps = available(sections.namespace);
+  const configOps = available(sections.config);
+  const globalOps = available(sections.global);
 
   // Fetched here rather than with the list of roles: it walks the whole
   // repository, and both tabs of Access management would have paid for it on
@@ -518,7 +529,7 @@ function RoleDialog({
             reaching every namespace and administering the portal are different powers.
           </p>
           <div className="op-grid">
-            {GLOBAL_OPS.filter((o) => operations.includes(o)).map((op) => (
+            {globalOps.map((op) => (
               <label key={op} className="check">
                 <input
                   type="checkbox"

@@ -234,9 +234,15 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 // operations are the deployment's vocabulary — the names the code checks — so
 // the editor offers exactly those and nothing invented.
 func (s *Server) handleListRoles(w http.ResponseWriter, _ *http.Request) {
+	// Which section of the editor each operation belongs in. Sent rather than
+	// known on the other side: a copy of this over there has gone stale twice,
+	// and both times the symptom was a permission nobody could grant.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"roles":      s.store.ListRoles(),
-		"operations": s.operations,
+		"roles":                s.store.ListRoles(),
+		"operations":           s.operations,
+		"namespaceOperations":  config.NamespaceOperations(),
+		"globalOperations":     config.GlobalOperations(),
+		"configurationOptions": config.ConfigOperations(),
 		// How many people hold each role. Shown in the list so the question
 		// "who has this" has an answer without scanning the users table, while
 		// the role editor stays about what a role permits.

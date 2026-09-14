@@ -27,15 +27,20 @@ imagePullSecrets: []
 replicaCount: 1
 
 # --- Storage ------------------------------------------------------------
-# Who has signed in, and which roles they were assigned in the UI, are kept in
-# a JSON file on this volume. Everything else is deployed with the chart; this
-# is the only state the release owns, so it is also the only thing that needs
-# backing up. The claim survives `helm uninstall`.
+# A volume, for the file backend only. Off by default: the access model lives in
+# a Secret now (config.storage.backend), which no volume is needed for and which
+# several replicas can share.
 #
-# One replica only: the file is on a ReadWriteOnce volume. The chart refuses to
-# render otherwise rather than let two pods overwrite each other.
+# Turn it on where config.storage.backend is `file` — outside a cluster, or
+# where writing objects is not permitted. Then it is one replica only: the file
+# sits on a ReadWriteOnce volume, which a second pod cannot mount, and the chart
+# refuses to render rather than let two of them overwrite each other.
+#
+# It is also what an installation upgrading from an older version needs for one
+# release: the model is read from the file once, copied into the Secret, and the
+# file is then left alone.
 persistence:
-  enabled: true
+  enabled: false
   size: 128Mi
   accessMode: ReadWriteOnce
   # Leave empty to use the cluster's default class. On a cluster without one the
@@ -162,8 +167,22 @@ config:
     brandName: "" # defaults to DevOps Tools
     brandInitials: "" # the two-letter mark; derived from the name when empty
 
-  # Where the access model is written. Must be on the volume above.
+  # Where the access model is kept: who has signed in, and what they were
+  # granted in the UI.
   storage:
+    # kubernetes — a Secret in this namespace. No volume, and several replicas
+    #              can share it: the API server serialises the writes and a
+    #              watch tells the others at once.
+    # file       — one JSON file on the volume above. The original arrangement,
+    #              and the only one outside a cluster. One replica only.
+    #
+    # An existing installation is carried over on the first start with
+    # `kubernetes`: the file is copied into the Secret and then left alone, so
+    # the change can still be undone by setting this back to `file`.
+    backend: kubernetes
+    # Empty names it after the release.
+    secretName: ""
+    # Used by the file backend, and read once when migrating away from it.
     path: /data/devops-tools.json
 
   auth:
@@ -364,7 +383,7 @@ config:
 # --- Access model ----------------------------------------------------------
 # The roles a fresh installation starts with. This SEEDS AN EMPTY STORE and is
 # then never applied again: roles are edited in the UI, under Roles, and kept on
-# the volume, so a later `helm upgrade` cannot undo them. Changing this after
+# the store, so a later `helm upgrade` cannot undo them. Changing this after
 # the first install has no effect.
 # See config/example/application.yaml for the annotated version.
 rbacConfig:
@@ -387,4 +406,7 @@ rbacConfig:
           operations: ["*"]
       # Reaching every namespace and administering the portal are different
       # powers, so these are listed rather than implied by the wildcard above.
-      global: [user-list, user-manage]
+      # audit-read is here so that a fresh installation's administrator can see
+      # sign-ins from the start; where the audit page is off it simply never
+      # matches, rather than refusing to start.
+      global: [user-list, user-manage, audit-read, access-restore]

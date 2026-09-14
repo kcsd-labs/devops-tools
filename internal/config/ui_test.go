@@ -7,10 +7,10 @@ func TestBrandInitials(t *testing.T) {
 		name, initials, want string
 	}{
 		{"DevOps Tools", "", "DT"},
-		{"DevOps Tools", "dt", "DT"},    // explicit, and upper-cased
-		{"Platform", "", "PL"},          // one word: its first two letters
-		{"Ünïcode Portal", "", "ÜP"},    // runes, not bytes
-		{"", "", "DT"},                  // nothing to derive from
+		{"DevOps Tools", "dt", "DT"}, // explicit, and upper-cased
+		{"Platform", "", "PL"},       // one word: its first two letters
+		{"Ünïcode Portal", "", "ÜP"}, // runes, not bytes
+		{"", "", "DT"},               // nothing to derive from
 	}
 	for _, tc := range tests {
 		got := UIConfig{BrandName: tc.name, BrandInitials: tc.initials}.Initials()

@@ -42,25 +42,24 @@ func (s *Store) CreateLocalUser(username, email, passwordHash string, roles []st
 	if err := ValidateUsername(username); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.users[key(username)]; ok {
-		return fmt.Errorf("user %q: %w", username, ErrExists)
-	}
-	now := nowUTC()
-	s.users[key(username)] = &User{
-		Username:     username,
-		Email:        email,
-		Provider:     "local",
-		Roles:        roles,
-		PasswordHash: passwordHash,
-		Managed:      true,
-		FirstSeen:    now,
-		// Not LastSeen: they have not signed in yet, and claiming otherwise
-		// would misreport exactly what this column is for.
-	}
-	return s.save()
+	return s.mutate(func() error {
+		if _, ok := s.users[key(username)]; ok {
+			return fmt.Errorf("user %q: %w", username, ErrExists)
+		}
+		now := nowUTC()
+		s.users[key(username)] = &User{
+			Username:     username,
+			Email:        email,
+			Provider:     "local",
+			Roles:        roles,
+			PasswordHash: passwordHash,
+			Managed:      true,
+			FirstSeen:    now,
+			// Not LastSeen: they have not signed in yet, and claiming otherwise
+			// would misreport exactly what this column is for.
+		}
+		return nil
+	})
 }
 
 // SetPassword replaces the password of an account created here.
@@ -76,55 +75,52 @@ func (s *Store) CreateLocalUser(username, email, passwordHash string, roles []st
 // authenticating. Until then it is a standing grant for a name, which is why
 // an unclaimed one is worth showing plainly and worth being able to delete.
 func (s *Store) Invite(username, email string, roles []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.users[key(username)]; exists {
-		return fmt.Errorf("user %q: %w", username, ErrExists)
-	}
-	s.users[key(username)] = &User{
-		Username:  username,
-		Email:     email,
-		Roles:     roles,
-		FirstSeen: nowUTC(),
-		// Zero: nobody has signed in as this name. That is what separates an
-		// invitation from a record of a person, everywhere it matters.
-		LastSeen: time.Time{},
-	}
-	return s.save()
+	return s.mutate(func() error {
+		if _, exists := s.users[key(username)]; exists {
+			return fmt.Errorf("user %q: %w", username, ErrExists)
+		}
+		s.users[key(username)] = &User{
+			Username:  username,
+			Email:     email,
+			Roles:     roles,
+			FirstSeen: nowUTC(),
+			// Zero: nobody has signed in as this name. That is what separates an
+			// invitation from a record of a person, everywhere it matters.
+			LastSeen: time.Time{},
+		}
+		return nil
+	})
 }
 
 // Invited reports whether a record is an invitation nobody has claimed.
 func (u *User) Invited() bool { return u.LastSeen.IsZero() }
 
 func (s *Store) SetPassword(username, passwordHash string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	u, ok := s.users[key(username)]
-	if !ok {
-		return fmt.Errorf("user %q: %w", username, ErrNotFound)
-	}
-	if !u.Managed {
-		return fmt.Errorf("user %q: %w", username, ErrNotManaged)
-	}
-	u.PasswordHash = passwordHash
-	return s.save()
+	return s.mutate(func() error {
+		u, ok := s.users[key(username)]
+		if !ok {
+			return fmt.Errorf("user %q: %w", username, ErrNotFound)
+		}
+		if !u.Managed {
+			return fmt.Errorf("user %q: %w", username, ErrNotManaged)
+		}
+		u.PasswordHash = passwordHash
+		return nil
+	})
 }
 
 // SetRoles replaces a user's roles. An empty list revokes every one of them,
 // which takes effect on the caller's next request — roles are not carried in
 // the session.
 func (s *Store) SetRoles(username string, roles []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	u, ok := s.users[key(username)]
-	if !ok {
-		return fmt.Errorf("user %q: %w", username, ErrNotFound)
-	}
-	u.Roles = roles
-	return s.save()
+	return s.mutate(func() error {
+		u, ok := s.users[key(username)]
+		if !ok {
+			return fmt.Errorf("user %q: %w", username, ErrNotFound)
+		}
+		u.Roles = roles
+		return nil
+	})
 }
 
 // DeleteUser removes a record entirely: the account, or the history of somebody
@@ -136,14 +132,13 @@ func (s *Store) SetRoles(username string, roles []string) error {
 // next sign-in with no roles — which is a revocation, plainly, and the
 // interface says so before doing it.
 func (s *Store) DeleteUser(username string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.users[key(username)]; !ok {
-		return fmt.Errorf("user %q: %w", username, ErrNotFound)
-	}
-	delete(s.users, key(username))
-	return s.save()
+	return s.mutate(func() error {
+		if _, ok := s.users[key(username)]; !ok {
+			return fmt.Errorf("user %q: %w", username, ErrNotFound)
+		}
+		delete(s.users, key(username))
+		return nil
+	})
 }
 
 // LocalCredential returns the stored password hash for an account created here.
@@ -183,4 +178,66 @@ func NormaliseRoles(roles []string) []string {
 		out = append(out, r)
 	}
 	return out
+}
+
+// Known reports whether there is a record under this name. Used to decide
+// whether a lockout is worth sharing: locking a name nobody can sign in as
+// protects nothing.
+func (s *Store) Known(username string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.users[key(username)]
+	return ok
+}
+
+// LockedUntil reports when an account stops being locked out after too many
+// failed password attempts. Zero when it is not locked.
+func (s *Store) LockedUntil(username string) time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	until := s.lockouts[key(username)]
+	if until.Before(nowUTC()) {
+		return time.Time{}
+	}
+	return until
+}
+
+// LockUntil records a lockout where the other replicas can see it.
+//
+// Counting stays local to each replica — sharing every failed attempt would
+// mean a write to the cluster per attempt, which is exactly what an attacker
+// would like. Sharing the decision costs one write per lockout, and stops the
+// allowance from multiplying by the number of replicas.
+func (s *Store) LockUntil(username string, until time.Time) error {
+	return s.mutate(func() error {
+		s.pruneLockouts()
+		if s.lockouts == nil {
+			s.lockouts = map[string]time.Time{}
+		}
+		s.lockouts[key(username)] = until.UTC()
+		return nil
+	})
+}
+
+// Unlock clears a lockout after a successful sign-in.
+func (s *Store) Unlock(username string) error {
+	return s.mutate(func() error {
+		if _, ok := s.lockouts[key(username)]; !ok {
+			return errNoChange
+		}
+		delete(s.lockouts, key(username))
+		s.pruneLockouts()
+		return nil
+	})
+}
+
+// pruneLockouts drops the elapsed ones, so that a spray of names cannot grow
+// the stored model without bound. The caller holds the lock.
+func (s *Store) pruneLockouts() {
+	now := nowUTC()
+	for name, until := range s.lockouts {
+		if until.Before(now) {
+			delete(s.lockouts, name)
+		}
+	}
 }

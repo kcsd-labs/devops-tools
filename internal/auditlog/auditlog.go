@@ -164,6 +164,12 @@ func (r *Reader) Read(ctx context.Context, sc Scope, f Filter) (Page, error) {
 		to = from
 	}
 
+	// The page is assembled window by window, walking backwards, and Loki
+	// answers each window oldest first — which is right for reading logs and
+	// wrong here. Order the whole page once, at the end, rather than trusting
+	// either source to have done it.
+	sortNewestFirst(out)
+
 	next := to
 	if !next.After(floor) {
 		next = time.Time{} // the horizon, not a cursor

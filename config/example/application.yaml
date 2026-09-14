@@ -144,6 +144,17 @@ auth:
 # the only state this service owns — and the only thing worth backing up.
 # Normally a persistent volume; see the chart's persistence values.
 storage:
+  # kubernetes — a Secret in the service's own namespace. No volume, and several
+  #              replicas can share one model. Only available in a cluster.
+  # file       — one JSON file. The original arrangement, and the one to use
+  #              outside a cluster. A single writer, so a single replica.
+  #
+  # Switching to kubernetes copies the file across on the first start and then
+  # leaves it alone, so the change can be undone by setting this back.
+  backend: file
+  # The object the kubernetes backend uses. The chart names it after the release.
+  secretName: ""
+  # Used by the file backend, and read once when migrating away from it.
   path: /data/devops-tools.json
 
 # ---------------------------------------------------------------------------
@@ -212,7 +223,7 @@ rbac:
       # Operations that belong to no namespace. Deliberately not implied by the
       # wildcard above: reaching every namespace and administering the portal
       # itself are different powers, and one should not silently confer the other.
-      global: [user-list, user-manage]
+      global: [user-list, user-manage, audit-read, access-restore]
   
     # A typical application developer: full visibility into their own namespaces,
     # able to restart and manage secrets, but not to uninstall a release.

@@ -33,10 +33,6 @@ ingress:
   #     hosts:
   #       - devops-tools.example.com
 
-persistence:
-  # Set on a cluster without a default class, or the claim stays Pending.
-  storageClass: ""
-
 config:
   auth:
     provider: oidc

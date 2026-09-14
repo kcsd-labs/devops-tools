@@ -72,8 +72,8 @@ roles:
 ```
 
 Roles are created and edited under **Roles** in the UI, and who holds one is set
-under **Users**. Both live on a persistent volume, so a `helm upgrade` cannot
-undo them — the `rbacConfig` in the chart seeds an empty installation and is
+under **Users**. Both live in the store rather than in the chart, so a
+`helm upgrade` cannot undo them — the `rbacConfig` in the chart seeds an empty installation and is
 never applied again.
 
 With the `local` provider, accounts are created in the UI too: there is no
@@ -145,20 +145,38 @@ config:
     brandName: "Platform Console"
 ```
 
-Renaming the software itself is a different matter: the volume holding the
+Renaming the software itself is a different matter: the object holding the
 access model is named after the release, so a rename can leave it behind and
 present an empty portal. [docs/renaming.md](docs/renaming.md) has the procedure
 and the order that avoids it.
 
 ## State and backups
 
-DevOps Tools keeps one file: who has signed in and what they were granted. It lives
-on the volume the chart claims, which is retained when the release is removed.
+DevOps Tools keeps one thing: who has signed in and what they were granted.
 Everything else is deployed with the chart and needs no backup.
 
-`kubectl cp` cannot fetch it: that command runs `tar` inside the container, and
-this image is distroless — no shell, no tar, nothing to run. Take the file from
-the volume instead, with the workload stopped so nothing is writing to it:
+By default it lives in a Secret in the release's namespace, which is what lets
+more than one replica share it — the API server serialises the writes, and a
+watch tells the other replicas as soon as one lands. Backing it up is whatever
+already backs up the cluster, or:
+
+```bash
+kubectl -n devops-tools get secret devops-tools-access -o yaml > access-backup.yaml
+```
+
+Restoring is `kubectl apply` of that file. The object is named after the
+release, and nothing in the chart deletes it: `helm uninstall` leaves it behind,
+the same way it left the volume behind.
+
+Outside Kubernetes — or where writing objects is not allowed — set
+`config.storage.backend: file` together with `persistence.enabled: true`, and it
+is one JSON file on the volume the chart claims. The chart refuses the file
+backend without a volume: it would work until the first restart and then lose
+every role, with no error anywhere.
+
+A single writer, so a single replica; and `kubectl cp` cannot fetch the file,
+because that command runs `tar` inside the container and this image is
+distroless. Take it from the volume with the workload stopped:
 
 ```bash
 kubectl -n devops-tools scale deploy/devops-tools --replicas=0
@@ -169,12 +187,9 @@ kubectl -n devops-tools run access-backup --rm --attach --restart=Never \
 kubectl -n devops-tools scale deploy/devops-tools --replicas=1
 ```
 
-The claim is named after the release. Restoring is the same shape with the file
-going the other way.
-
-Set `persistence.storageClass` on a cluster without a default class, or the
-claim stays `Pending` and the pod never starts. Only one replica is supported
-while persistence is on — the chart refuses to render otherwise.
+An installation that already has the file is carried over on the first start
+with the Kubernetes backend: the model is copied across and the file is left
+untouched, so the change can be undone by setting the backend back.
 
 ## Install
 
