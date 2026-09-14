@@ -87,17 +87,21 @@ jobs:
           Start from an example values file — one per way of signing in:
 
           ```bash
+          # accounts kept by the portal itself, with nothing else to install
           curl -O https://raw.githubusercontent.com/__REPO__/__TAG__/examples/values-local.yaml
-          # fill in the administrator password, then
-          helm install devops-tools __REGISTRY__/devops-tools --version __CHART__ \
-            --namespace devops-tools --create-namespace \
-            -f values-local.yaml
+          # Active Directory or OpenLDAP
+          curl -O https://raw.githubusercontent.com/__REPO__/__TAG__/examples/values-ldap.yaml
+          # Keycloak, and anything else speaking OpenID Connect
+          curl -O https://raw.githubusercontent.com/__REPO__/__TAG__/examples/values-oidc.yaml
           ```
 
-          `values-local.yaml` keeps accounts in the portal itself, with nothing
-          else to install. `values-ldap.yaml` is for Active Directory or
-          OpenLDAP, and `values-oidc.yaml` for Keycloak and anything else
-          speaking OpenID Connect.
+          Fill in the one you took, then install with it:
+
+          ```bash
+          helm install devops-tools __REGISTRY__/devops-tools --version __CHART__ \
+            --namespace devops-tools --create-namespace \
+            -f values-ldap.yaml
+          ```
 
           The administrator password is the one thing an install has to decide:
           nothing here ships a default, so with none set the service stops at
