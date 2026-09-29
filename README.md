@@ -260,10 +260,19 @@ By default the chart creates a `ClusterRole`, so one installation can serve
 every namespace. If that is not acceptable, `rbac.scope: namespace` restricts
 it to the release namespace instead.
 
-Uninstalling a Helm release means deleting whatever that release created. If
-your charts contain custom resources, add their API groups under
-`rbac.extraRules` — otherwise the uninstall leaves them behind and reports a
-partial failure.
+Uninstalling a Helm release means deleting whatever that release created, and
+rolling one back means creating it again. If your charts contain custom
+resources — an operator's database, a certificate, a monitor — add their API
+groups under `rbac.extraRules`, otherwise the uninstall leaves them behind and
+reports a partial failure.
+
+An installation that manages charts it does not write can grant everything
+instead, with `apiGroups`, `resources` and `verbs` all set to `["*"]`. That
+never has to be revisited, and the price is stated plainly: with
+`scope: cluster` it makes the service account a cluster administrator. What the
+portal offers its users does not change — that is the in-app access model's
+decision — but the token mounted in the pod becomes a cluster-admin credential,
+and anyone who can reach that pod inherits it.
 
 ## Development
 

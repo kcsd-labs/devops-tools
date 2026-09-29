@@ -40,7 +40,11 @@ func main() {
 		return
 	}
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	// Info until the configuration has been read, then whatever it asks for. A
+	// LevelVar rather than a second handler, so the lines written during
+	// startup and the ones after it go to the same place.
+	level := new(slog.LevelVar)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
 
 	loader, err := config.LoaderFromEnv()
 	if err != nil {
@@ -51,6 +55,11 @@ func main() {
 	cfg, rbacCfg, err := config.Load(loader)
 	if err != nil {
 		fail("load configuration", err)
+	}
+	// Load has already refused anything that is not a level.
+	if want, _ := config.ParseLogLevel(cfg.LogLevel); want != level.Level() {
+		level.Set(want)
+		slog.Info("log level set", "level", want.String())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

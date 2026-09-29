@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"log/slog"
+	"strings"
+	"testing"
+)
 
 func TestCheckBcryptHash(t *testing.T) {
 	tests := []struct {
@@ -149,5 +153,43 @@ func TestEveryOperationBelongsToASection(t *testing.T) {
 		if !sections[op] {
 			t.Errorf("%q is offered but belongs to no section of the role editor", op)
 		}
+	}
+}
+
+func TestTheLogLevelIsReadAndTyposAreRefused(t *testing.T) {
+	// Empty is what every installation that never heard of this setting has.
+	for _, tc := range []struct {
+		in   string
+		want slog.Level
+	}{
+		{"", slog.LevelInfo},
+		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{" warn ", slog.LevelWarn},
+		{"error", slog.LevelError},
+	} {
+		got, err := ParseLogLevel(tc.in)
+		if err != nil {
+			t.Errorf("ParseLogLevel(%q): %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("ParseLogLevel(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+
+	// Somebody setting this wants to see more. Falling back to info would show
+	// them less than they asked for and say nothing about it.
+	if _, err := ParseLogLevel("verbose"); err == nil {
+		t.Error("a level that does not exist was accepted")
+	} else if !strings.Contains(err.Error(), "debug") {
+		t.Errorf("the error does not say what the levels are: %v", err)
+	}
+
+	// And it is refused where an installation would find out about it: at load,
+	// not on the first line that would have been written at that level.
+	cfg := &Config{LogLevel: "verbose"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "logLevel") {
+		t.Errorf("Validate() = %v, want it to refuse the level", err)
 	}
 }

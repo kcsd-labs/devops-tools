@@ -32,12 +32,18 @@ environment: production
 impersonation:
   defaultGroup: devops-tools-users
   enabled: false
+logLevel: info
 logs:
+  archiveNote: ""
+  archiveURL: ""
+  horizon: 720h
   lokiURL: ""
 metrics:
   prometheusURL: ""
 storage:
+  backend: kubernetes
   path: /data/devops-tools.json
+  secretName: t-devops-tools-access
 ui:
   brandInitials: ""
   brandName: ""
@@ -48,6 +54,8 @@ rbac:
       global:
       - user-list
       - user-manage
+      - audit-read
+      - access-restore
       namespaces:
       - namespace: '*'
         operations:

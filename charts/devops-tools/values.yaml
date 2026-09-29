@@ -138,13 +138,33 @@ serviceAccount:
 rbac:
   create: true
   scope: cluster
-  # Uninstalling a Helm release means deleting whatever that release created.
-  # Add the API groups of any custom resources your charts contain, otherwise
-  # the uninstall leaves them behind and reports a partial failure.
+  # Uninstalling a Helm release means deleting whatever that release created,
+  # and rolling one back means creating it again. The rules above cover the
+  # built-in kinds; a chart containing a custom resource — an operator's
+  # database, a certificate, a monitor — needs its API group adding here, or
+  # the uninstall leaves it behind and reports a partial failure.
+  #
+  # Narrow, naming the operators you actually run:
+  #
+  #   extraRules:
+  #     - apiGroups: ["redis.redis.opstreelabs.in"]
+  #       resources: ["redis", "redisclusters"]
+  #       verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  #
+  # Blanket, for an installation that manages charts it does not write and
+  # would rather not revisit this list:
+  #
+  #   extraRules:
+  #     - apiGroups: ["*"]
+  #       resources: ["*"]
+  #       verbs: ["*"]
+  #
+  # Worth knowing before choosing the second: with `scope: cluster` it grants
+  # the service account the cluster, including write access to RBAC itself.
+  # What the portal offers its users does not change — that is decided by the
+  # in-app access model — but the token mounted in the pod becomes a
+  # cluster-admin credential, so anyone who can reach that pod inherits it.
   extraRules: []
-  # - apiGroups: ["redis.redis.opstreelabs.in"]
-  #   resources: ["redis", "redisclusters"]
-  #   verbs: ["get", "list", "watch", "delete"]
 
 # --- Session signing key ---------------------------------------------------
 # Used by the local and ldap providers. Left empty the chart generates one and
@@ -159,6 +179,12 @@ session:
 # fully documented version.
 config:
   environment: production
+
+  # debug, info, warn or error. Raise it to debug to see what the Helm SDK says
+  # while an operation runs — the per-resource detail behind a failed uninstall
+  # or rollback is narrated there, over and above the summary that reaches the
+  # audit trail. Noisy; meant for a diagnosis, not for every day.
+  logLevel: info
 
   # What the interface calls itself. The technical name — module, chart, image,
   # environment variables, the volume — stays DevOps Tools: renaming that would

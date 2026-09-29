@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -16,7 +17,13 @@ import (
 type Config struct {
 	// Environment is a free-form label ("dev", "staging", "production").
 	// Shown in the UI and recorded in the audit log.
-	Environment   string              `yaml:"environment"`
+	Environment string `yaml:"environment"`
+	// LogLevel is debug, info, warn or error; empty means info. Worth having
+	// because some of what the service knows is written at debug and was
+	// therefore unreachable at any setting — the Helm SDK narrates the detail
+	// of an operation there, and that detail is sometimes the only account of
+	// why something failed.
+	LogLevel      string              `yaml:"logLevel"`
 	Server        ServerConfig        `yaml:"server"`
 	Auth          AuthConfig          `yaml:"auth"`
 	Storage       StorageConfig       `yaml:"storage"`
@@ -32,6 +39,23 @@ type Config struct {
 	// two: the roles it describes are configuration like everything else here,
 	// and a second file bought nothing but a second thing to find.
 	RBAC RBACConfig `yaml:"rbac"`
+}
+
+// ParseLogLevel reads Config.LogLevel. Empty is info, which is what the service
+// ran at before there was a setting at all.
+//
+// A value that is not a level is an error rather than a fall-back to info:
+// somebody who sets this is trying to see more, and quietly showing them less
+// than they asked for is the failure mode worth avoiding.
+func ParseLogLevel(s string) (slog.Level, error) {
+	if strings.TrimSpace(s) == "" {
+		return slog.LevelInfo, nil
+	}
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(strings.TrimSpace(s))); err != nil {
+		return 0, fmt.Errorf("logLevel %q is not a level; use debug, info, warn or error", s)
+	}
+	return level, nil
 }
 
 // ImageRebuildConfig turns on rebuilding a workload's image from the portal.
@@ -672,6 +696,10 @@ func checkBcryptHash(h string) error {
 
 // Validate catches misconfiguration at startup rather than on first login.
 func (c *Config) Validate() error {
+	if _, err := ParseLogLevel(c.LogLevel); err != nil {
+		return err
+	}
+
 	switch c.Storage.Kind() {
 	case StorageFile:
 		if c.Storage.Path == "" {

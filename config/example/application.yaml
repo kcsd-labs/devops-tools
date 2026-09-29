@@ -12,6 +12,14 @@
 # Free-form label shown in the UI and recorded in the audit log.
 environment: "dev"
 
+# debug, info, warn or error. Empty means info.
+#
+# Debug carries what the Helm SDK narrates while an operation runs: which
+# resource it is deleting, and which one it could not. That detail is not in
+# the error the SDK returns, so it is the only account of why an uninstall or
+# a rollback failed beyond the summary. Noisy — turn it on for a diagnosis.
+logLevel: info
+
 # What the interface calls itself — the sidebar, the sign-in screen, the browser
 # tab. A setting rather than a string in the code so an installation can carry
 # its own name; the technical identity stays DevOps Tools regardless.
