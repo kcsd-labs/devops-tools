@@ -33,6 +33,20 @@ ingress:
   #     hosts:
   #       - devops-tools.example.com
 
+# Kubernetes permissions. The service account is a cluster administrator by
+# default: removing a Helm release means deleting whatever that release created,
+# and what a chart contains is not knowable in advance — a list of kinds stops
+# being enough the moment one carries an operator's custom resource.
+#
+# It does not widen what the portal offers anyone; who may do what, and where,
+# is the access model's decision. It does mean the token in the pod is a
+# cluster-admin credential. Where that is not acceptable:
+#
+# rbac:
+#   fullAccess: false # the built-in kinds only, plus the API groups of your own
+#                     # operators named under rbac.extraRules
+#   scope: namespace  # one namespace instead of the whole cluster
+
 config:
   auth:
     provider: oidc

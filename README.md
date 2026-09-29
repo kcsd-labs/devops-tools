@@ -256,23 +256,28 @@ configuration.
 
 ### Permissions
 
-By default the chart creates a `ClusterRole`, so one installation can serve
-every namespace. If that is not acceptable, `rbac.scope: namespace` restricts
-it to the release namespace instead.
+By default the chart creates a `ClusterRole` covering every resource, so the
+service account is a cluster administrator. That is a deliberate default, and
+the reasoning is worth stating rather than hiding.
 
 Uninstalling a Helm release means deleting whatever that release created, and
-rolling one back means creating it again. If your charts contain custom
-resources — an operator's database, a certificate, a monitor — add their API
-groups under `rbac.extraRules`, otherwise the uninstall leaves them behind and
-reports a partial failure.
+rolling one back means creating it again. What a chart contains is not knowable
+from here: the moment somebody installs one carrying an operator's custom
+resource, an enumerated list of kinds stops being enough — the uninstall halts
+half-way, leaves the release behind, and reports only that it failed. Argo CD
+and Flux grant their controllers the same thing for the same reason.
 
-An installation that manages charts it does not write can grant everything
-instead, with `apiGroups`, `resources` and `verbs` all set to `["*"]`. That
-never has to be revisited, and the price is stated plainly: with
-`scope: cluster` it makes the service account a cluster administrator. What the
-portal offers its users does not change — that is the in-app access model's
-decision — but the token mounted in the pod becomes a cluster-admin credential,
-and anyone who can reach that pod inherits it.
+This does not widen what the portal offers anyone. Who may do what, and in
+which namespace, is decided by the in-app access model, and no Kubernetes grant
+changes that. What it does mean is that the token mounted in the pod is a
+cluster-admin credential, so whoever can reach that pod inherits it.
+
+Two ways to give away less:
+
+| Setting | Effect |
+|---|---|
+| `rbac.fullAccess: false` | the built-in kinds only; name your operators' API groups under `rbac.extraRules`, or their resources survive an uninstall |
+| `rbac.scope: namespace` | a `Role` in the release namespace, and the installation sees nothing else |
 
 ## Development
 

@@ -12,14 +12,18 @@ Reach the UI:
 
 Signing in:
 {{- if eq .Values.config.auth.provider "local" }}
-  Provider: local accounts from values.yaml.
+  Provider: local accounts kept by the portal itself.
+{{- with .Values.config.auth.bootstrapAdmins.passwordLogin.username }}
 
-  ⚠  The default account is admin / admin. Replace it before anyone else can
-     reach this service:
+  Sign in as {{ . }}, with the password from
+  config.auth.bootstrapAdmins.passwordLogin, and create everyone else under
+  Access management. Nothing here ships a password: without one the service
+  refuses to start rather than being reachable with a known one.
+{{- else }}
 
-       docker run --rm {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }} hash-password 'a-strong-password'
-
-     then put the hash into config.auth.local.users[0].passwordHash and upgrade.
+  ⚠  Nothing can sign in. Give config.auth.bootstrapAdmins.passwordLogin a
+     username and a password, or list accounts under config.auth.local.users.
+{{- end }}
 {{- else if eq .Values.config.auth.provider "ldap" }}
   Provider: LDAP ({{ .Values.config.auth.ldap.url }}).
   The bind password must come from a secret listed in envFromSecrets as
@@ -33,8 +37,28 @@ Signing in:
 Access model: users get roles from the provider, and rbacConfig maps those
 roles to namespaces and operations. Everything not granted is denied.
 
-{{- if eq .Values.rbac.scope "namespace" }}
+{{- if .Values.rbac.create }}
 
-Note: rbac.scope is "namespace", so this installation only sees
-{{ .Release.Namespace }}.
+In Kubernetes:
+{{- if .Values.rbac.fullAccess }}
+{{- if eq .Values.rbac.scope "cluster" }}
+  The service account may act on any resource in any namespace — it is a
+  cluster administrator. Uninstalling a Helm release means deleting whatever
+  that release created, and what a chart contains is not knowable in advance,
+  so this is the default. It does not widen what the portal offers anyone; it
+  does mean the token in the pod is a cluster-admin credential.
+
+  Narrow it with rbac.fullAccess: false, or rbac.scope: namespace.
+{{- else }}
+  The service account may act on any resource in {{ .Release.Namespace }},
+  and this installation sees no other namespace.
+{{- end }}
+{{- else }}
+  The service account is limited to the built-in kinds and whatever
+  rbac.extraRules names. A release containing anything else — an operator's
+  custom resource, say — will not uninstall cleanly.
+{{- if eq .Values.rbac.scope "namespace" }}
+  This installation also sees only {{ .Release.Namespace }}.
+{{- end }}
+{{- end }}
 {{- end }}

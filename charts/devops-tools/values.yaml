@@ -138,32 +138,37 @@ serviceAccount:
 rbac:
   create: true
   scope: cluster
-  # Uninstalling a Helm release means deleting whatever that release created,
-  # and rolling one back means creating it again. The rules above cover the
-  # built-in kinds; a chart containing a custom resource — an operator's
-  # database, a certificate, a monitor — needs its API group adding here, or
-  # the uninstall leaves it behind and reports a partial failure.
+
+  # Whether the service account may act on any resource.
   #
-  # Narrow, naming the operators you actually run:
+  # On, because removing a Helm release means deleting whatever that release
+  # created, and what a chart contains cannot be known from here. A list of
+  # kinds works until somebody installs a chart carrying an operator's custom
+  # resource — and then the uninstall stops half-way, leaves the release
+  # behind, and says only that it failed. Argo CD and Flux grant their
+  # controllers the same thing for the same reason.
+  #
+  # Read this as what it is: with `scope: cluster` the service account is a
+  # cluster administrator. What the portal offers its users does not change —
+  # that is decided by the in-app access model, per person and per namespace —
+  # but the token mounted in the pod becomes a cluster-admin credential, and
+  # whoever can reach that pod inherits it.
+  #
+  # Two ways to give away less:
+  #
+  #   rbac.scope: namespace   one namespace instead of the cluster
+  #   rbac.fullAccess: false  a list of the built-in kinds, plus whatever you
+  #                           name under extraRules
+  fullAccess: true
+
+  # Extra rules, appended whichever of the two is in force. With fullAccess off,
+  # this is where the API groups of your own operators go — otherwise their
+  # resources survive an uninstall:
   #
   #   extraRules:
   #     - apiGroups: ["redis.redis.opstreelabs.in"]
   #       resources: ["redis", "redisclusters"]
   #       verbs: ["get", "list", "watch", "create", "patch", "delete"]
-  #
-  # Blanket, for an installation that manages charts it does not write and
-  # would rather not revisit this list:
-  #
-  #   extraRules:
-  #     - apiGroups: ["*"]
-  #       resources: ["*"]
-  #       verbs: ["*"]
-  #
-  # Worth knowing before choosing the second: with `scope: cluster` it grants
-  # the service account the cluster, including write access to RBAC itself.
-  # What the portal offers its users does not change — that is decided by the
-  # in-app access model — but the token mounted in the pod becomes a
-  # cluster-admin credential, so anyone who can reach that pod inherits it.
   extraRules: []
 
 # --- Session signing key ---------------------------------------------------

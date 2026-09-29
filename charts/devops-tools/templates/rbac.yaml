@@ -23,6 +23,19 @@ metadata:
   {{- end }}
   labels: {{- include "devops-tools.labels" . | nindent 4 }}
 rules:
+{{- if .Values.rbac.fullAccess }}
+  # Everything, because removing a Helm release means deleting whatever that
+  # release created and rolling one back means creating it again — and what a
+  # chart contains is not knowable from here. An enumerated list works until
+  # somebody installs a chart with an operator's custom resource in it, and then
+  # the uninstall stops half-way and leaves the release behind.
+  #
+  # Turn this off with rbac.fullAccess: false to get a list of the built-in
+  # kinds instead, and name your own under rbac.extraRules.
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+{{- else }}
   # Read pods, their logs and their events.
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events"]
@@ -75,6 +88,7 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- end }}
 
   {{- with .Values.rbac.extraRules }}
   {{- toYaml . | nindent 2 }}
