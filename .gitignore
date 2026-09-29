@@ -20,6 +20,9 @@ internal/ui/dist/*
 web/node_modules/
 web/dist/
 web/.vite/
+# tsc rewrites this on every build, so tracking it left the tree dirty after
+# any frontend work whether or not anything had changed.
+web/tsconfig.tsbuildinfo
 npm-debug.log*
 
 # --- editors / OS ---
