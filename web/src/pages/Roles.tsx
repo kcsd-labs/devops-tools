@@ -432,7 +432,7 @@ function RoleDialog({
           ))}
 
           <button
-            className="btn ghost sm"
+            className="role-add"
             onClick={() => setGrants((gs) => [...gs, { namespace: "", operations: [] }])}
           >
             + Add namespace
@@ -440,7 +440,7 @@ function RoleDialog({
 
           {configOps.length > 0 && (
             <>
-              <div className="field">
+              <div className="field role-section">
                 <label className="muted">Configurations</label>
               </div>
               <p className="muted field-hint">
@@ -503,7 +503,7 @@ function RoleDialog({
               ))}
 
               <button
-                className="btn ghost sm"
+                className="role-add"
                 onClick={() => setConfigs((cs) => [...cs, { path: "", operations: [] }])}
               >
                 + Add configuration path
@@ -521,7 +521,7 @@ function RoleDialog({
             </>
           )}
 
-          <div className="field roles-global">
+          <div className="field role-section">
             <label className="muted">Portal administration</label>
           </div>
           <p className="muted field-hint">

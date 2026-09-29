@@ -85,10 +85,15 @@ export function Storage() {
 
   return (
     <div className="page">
+      {/* The tabs belong beside the title, as they are on the other two: put
+          below it instead and the switcher jumps down a line when you reach
+          this tab, which reads as the page having moved. */}
       <div className="page-head">
-        <h1 className="page-title">Access management</h1>
+        <div className="row head-left">
+          <h1 className="page-title">Access management</h1>
+          <AccessTabs />
+        </div>
       </div>
-      <AccessTabs />
 
       {error && <div className="alert">{error}</div>}
 

@@ -1410,6 +1410,33 @@ body {
   gap: 6px 14px;
   margin-bottom: 14px;
 }
+
+/* "+ Add namespace" and "+ Add configuration path" continue the list above
+   them. As ordinary small buttons they sat loose between two blocks, close
+   enough to the next heading to read as belonging to it; full width and
+   dashed, they read as the empty next row of the list they add to. */
+.role-add {
+  width: 100%;
+  padding: 9px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.role-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* The editor asks three separate questions — which namespaces, which
+   configuration paths, and the portal itself — and they ran together. */
+.role-section {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
 /* The read-only view of the same thing, in the roles table. */
 .grant-list {
   display: flex;
