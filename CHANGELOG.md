@@ -3,23 +3,34 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
-## Unreleased
+## 0.25.5
 
-- **A failed Helm operation now says what went wrong.** Which resource could not
-  be deleted is something the SDK mentions only in passing and leaves out of the
-  error it returns, so the audit trail recorded "failed" and nothing more. It is
-  carried out now — into the message on screen and into the trail.
-- **`config.logLevel`**: debug, info, warn or error. Some of what the service
-  knows was written at debug and therefore unreachable at any setting.
 - **The chart now grants the service account every resource by default**
   (`rbac.fullAccess`). Removing a Helm release means deleting whatever that
-  release created, and a list of kinds stops being enough the moment a chart
-  carries an operator's custom resource — the uninstall halts half-way and says
-  only that it failed. With `rbac.scope: cluster` this makes the service account
-  a cluster administrator; it does not change what the portal offers anyone, but
-  the token in the pod becomes a cluster-admin credential. Set
-  `rbac.fullAccess: false` for the previous list of kinds. **An upgrade widens an
-  existing installation's permissions**, which is worth knowing before taking it.
+  release created, and rolling one back means creating it again — a list of
+  kinds stops being enough the moment a chart carries an operator's custom
+  resource, and then the uninstall halts half-way, leaves the release behind
+  and says only that it failed. Argo CD and Flux grant their controllers the
+  same thing for the same reason. With `rbac.scope: cluster` this makes the
+  service account a cluster administrator: it does not change what the portal
+  offers anyone — that is the access model's decision — but the token in the
+  pod becomes a cluster-admin credential. Set `rbac.fullAccess: false` for the
+  previous list of kinds. **An upgrade widens an existing installation's
+  permissions**, which is worth knowing before taking it.
+- **A failed Helm operation now says what went wrong.** Which resource could not
+  be deleted is something the SDK narrates in passing and leaves out of the
+  error it returns, so the audit trail recorded "failed" and nothing else — and
+  a half-removed release could sit unnoticed for a fortnight. That detail is
+  carried out now, into the message on screen and into the trail.
+- **`config.logLevel`**: debug, info, warn or error. Worth having because some
+  of what the service knows was written at debug and therefore unreachable at
+  any setting.
+- The role editor reads as the three questions it asks. The buttons that add a
+  namespace or a configuration path sat between two blocks, close enough to the
+  next heading to look like part of it; they now continue the list they add to,
+  and a rule separates the sections.
+- The Storage tab no longer moves the Users / Roles / Storage switcher down a
+  line when you reach it.
 - The post-install notes said the default account was `admin` / `admin`. It has
   not been since the chart stopped shipping a password.
 
