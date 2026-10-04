@@ -159,7 +159,7 @@ jobs:
             | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
             | awk '/^- / { if (line != "") print line; line = $0; next }
                    /^[[:space:]]*$/ { if (line != "") print line; line = ""; next }
-                   { sub(/^[[:space:]]+/, ""); line = line " " $0 }
+                   { sub(/^[[:space:]]+/, ""); line = (line == "" ? $0 : line " " $0) }
                    END { if (line != "") print line }' \
             | head -c 2500)
 
