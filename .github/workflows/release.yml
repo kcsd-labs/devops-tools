@@ -126,3 +126,71 @@ jobs:
           fi
           cat notes.md
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+
+      # The release group on Telegram, the same one the GitLab pipelines post
+      # to. Nothing here is KCSD-specific except the two secrets: without them
+      # the step says so and ends, so a fork releases exactly as before.
+      #
+      # HTML rather than Markdown, which is what the GitLab templates use: a
+      # changelog carries backticks, underscores and brackets, and Markdown
+      # mode rejects the whole message over one of them. HTML only cares about
+      # three characters, and they are escaped below.
+      - name: Tell the release group
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_GROUP_ID: ${{ secrets.TG_GROUP_ID }}
+          APP: ${{ steps.v.outputs.app }}
+          CHART: ${{ steps.v.outputs.chart }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_GROUP_ID" ]; then
+            echo "TG_BOT_TOKEN or TG_GROUP_ID is not set; no message sent."
+            exit 0
+          fi
+
+          # The same section the notes were built from. Out come the markers
+          # that only mean something in Markdown, escaped are the three that
+          # mean something in HTML, and undone is the hard wrapping: the file
+          # is wrapped for reading as a file, and a phone wraps it again, which
+          # leaves every second line indented for no reason.
+          changelog=$(awk -v want="## $APP" '$0 == want {found=1; next} /^## / {found=0} found' CHANGELOG.md \
+            | sed -e 's/\*\*//g' -e 's/`//g' \
+            | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+            | awk '/^- / { if (line != "") print line; line = $0; next }
+                   /^[[:space:]]*$/ { if (line != "") print line; line = ""; next }
+                   { sub(/^[[:space:]]+/, ""); line = line " " $0 }
+                   END { if (line != "") print line }' \
+            | head -c 2500)
+
+          # One line per argument rather than one indented string: the file's
+          # own indentation would otherwise have to be stripped afterwards,
+          # and that takes the changelog's indentation with it.
+          text=$(printf '%s\n' \
+            "🔥<b>Релиз</b>" \
+            "Проект: <code>${REPO##*/}</code>" \
+            "Версия: <code>${APP}</code>" \
+            "Чарт: <code>${CHART}</code>" \
+            "Changelog:" \
+            "<code>${changelog}</code>" \
+            "" \
+            "Образ и чарт опубликованы!" \
+            "" \
+            "Релиз: https://github.com/${REPO}/releases/tag/${GITHUB_REF_NAME}" \
+            "Пайплайн: https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}" \
+            "Пользователь: <i>${ACTOR}</i>" \
+            "" \
+            "Контейнер: <a href=\"https://hub.docker.com/r/${IMAGE}/tags?name=${APP}\">${IMAGE}:${APP}</a>")
+
+          # Built with jq rather than by hand: a changelog contains quotes and
+          # newlines, and a hand-quoted JSON body is where that ends badly.
+          jq -n --arg chat "$TG_GROUP_ID" --arg text "$text" \
+            '{chat_id: $chat, text: $text, parse_mode: "HTML",
+              disable_notification: true, disable_web_page_preview: true}' > tg.json
+
+          # --fail-with-body so a refusal is visible: Telegram answers 400 with
+          # the reason in the body, and a silent failure here means a release
+          # nobody heard about.
+          curl -sS --fail-with-body -X POST \
+            "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -H 'Content-Type: application/json' -d @tg.json
