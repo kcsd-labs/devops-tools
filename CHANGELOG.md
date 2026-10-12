@@ -3,6 +3,26 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.25.7
+
+- Everything Docker Scout reported against 0.25.6 is fixed. Go 1.26.9 — the
+  image had been built with 1.26.8, which missed thirteen fixes to the standard
+  library, three of them in the HTTP server and reachable before sign-in.
+  Helm 3.22, the Kubernetes client libraries 0.37, and patched oras-go,
+  golang.org/x/net, golang.org/x/crypto and go-ldap.
+- Helm 3.22 no longer depends on containerd, and signs charts with
+  ProtonMail's maintained OpenPGP library. The findings that had no fix
+  upstream went with the code that carried them.
+- One finding remains in scanners that read the module list rather than the
+  code: GO-2026-5932, against golang.org/x/crypto, for openpgp packages that
+  are not compiled into the binary. The image carries a VEX statement saying
+  so, and CI fails the build if it ever stops being true.
+- The base image is Debian 13. Debian 12 is past regular security support.
+- The interface is built with Node 24, from the lock file, on Vite 8 and React
+  Router 7. Until now the image ignored the lock file and built from whatever
+  the version ranges resolved to that day.
+- Images are published with an SBOM and build provenance.
+
 ## 0.25.6
 
 - INFR-1802 — LDAP authentication: people sign in with the account they already
