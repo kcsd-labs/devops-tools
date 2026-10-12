@@ -14,14 +14,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # From go.mod, so the toolchain here is the one the Dockerfile builds with
-      # and nobody has to remember to bump two places.
+      # From go.mod. The Dockerfile names the same release separately — the
+      # step below is what keeps the two from drifting.
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
       - run: go vet ./...
       - run: go test ./...
+
+      # The tests and the weekly scan use the toolchain go.mod names; the image
+      # is built with the one the Dockerfile names. Different releases mean the
+      # scan reads one standard library and the image ships another, which is
+      # how 0.25.6 went out on 1.26.8 with thirteen fixes already published.
+      # An older one in the Dockerfile fails its own build; this catches the
+      # newer one, which would build without complaint.
+      - name: Dockerfile builds with the go.mod toolchain
+        run: |
+          want=$(sed -n 's/^go \([0-9.]*\)$/\1/p' go.mod)
+          got=$(sed -n 's/^FROM golang:\([0-9.]*\) .*/\1/p' Dockerfile)
+          echo "go.mod: $want  Dockerfile: $got"
+          if [ -z "$want" ] || [ "$want" != "$got" ]; then
+            echo "Set FROM golang:$want in the Dockerfile, or bump go.mod to match."
+            exit 1
+          fi
+
+      # .vex/ tells scanners the image is not affected by findings that sit in
+      # a module we need but in a package we never compile. That is true today
+      # and has to stay true: the day the package reaches the build, the
+      # statement becomes a false one published with every image.
+      - name: The VEX statements still hold
+        run: |
+          linked=$(go list -deps ./cmd/server | grep '^golang.org/x/crypto/openpgp' || true)
+          if [ -n "$linked" ]; then
+            echo "golang.org/x/crypto/openpgp is compiled in again:"
+            echo "$linked" | sed 's/^/  /'
+            echo "Remove .vex/GO-2026-5932.vex.json, or find what brought it back."
+            exit 1
+          fi
+          echo "golang.org/x/crypto/openpgp is not in the binary."
 
   web:
     name: Web interface
@@ -31,9 +62,10 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      # The same line the Dockerfile builds the interface with.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci

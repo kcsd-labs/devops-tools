@@ -1,0 +1,24 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/kcsd-labs/devops-tools/blob/main/.vex/GO-2026-5932.vex.json",
+  "author": "DevOps Tools",
+  "role": "Project maintainers",
+  "timestamp": "2026-10-12T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932",
+        "description": "golang.org/x/crypto/openpgp is unmaintained, unsafe by design, and has known security issues"
+      },
+      "products": [
+        {
+          "@id": "pkg:docker/1kcsd/devops-tools@__VERSION__"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The finding covers every version of the golang.org/x/crypto module, because the openpgp packages inside it will never be fixed. The binary requires the module for golang.org/x/crypto/bcrypt, but none of the golang.org/x/crypto/openpgp packages is compiled into it: Helm signs charts with github.com/ProtonMail/go-crypto/openpgp instead. CI fails the build if golang.org/x/crypto/openpgp ever enters the dependency graph of cmd/server."
+    }
+  ]
+}

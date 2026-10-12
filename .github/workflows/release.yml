@@ -62,6 +62,13 @@ jobs:
           # calls itself `dev`.
           build-args: VERSION=${{ steps.v.outputs.app }}
           tags: ${{ env.IMAGE }}:${{ steps.v.outputs.app }}
+          # An SBOM lets a scanner read what is in the image instead of
+          # inferring it, and provenance records how it was built. Both are
+          # attestations, which is also why the VEX statements further down are
+          # attached rather than copied in: Scout ignores VEX files on the
+          # filesystem of an image that carries any attestation.
+          sbom: true
+          provenance: mode=max
 
       - uses: azure/setup-helm@v4
       - name: Package and push the chart
@@ -194,3 +201,36 @@ jobs:
           curl -sS --fail-with-body -X POST \
             "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
             -H 'Content-Type: application/json' -d @tg.json
+
+      # Last, after everything is published and announced: an exception is an
+      # addition to a release, not part of it, and it can be attached again to
+      # an image that is already out without rebuilding anything. A failure
+      # here leaves the release red, which is the point — but not unannounced.
+      #
+      # The documents in .vex/ name the image with a placeholder for the
+      # version, because a VEX statement is about one product.
+      - name: Render the VEX statements for this image
+        env:
+          APP: ${{ steps.v.outputs.app }}
+        run: |
+          mkdir -p vex
+          for f in .vex/*.vex.json; do
+            sed "s|@__VERSION__\"|@${APP}\"|" "$f" > "vex/$(basename "$f")"
+            grep -q "@${APP}\"" "vex/$(basename "$f")" || { echo "$f has no __VERSION__ placeholder"; exit 1; }
+          done
+          ls vex
+
+      - name: Attach them to the image
+        uses: docker/scout-action@v1
+        with:
+          # quickview after attaching, so the log ends with what Scout now
+          # reports for this image, exceptions applied.
+          command: attestation-add,quickview
+          # No prefix: that means image://, which every command accepts, and the
+          # runner has no local copy — buildx pushed without loading — so it is
+          # the registry's image either way.
+          image: ${{ env.IMAGE }}:${{ steps.v.outputs.app }}
+          file: vex/GO-2026-5932.vex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+          dockerhub-user: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}

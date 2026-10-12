@@ -38,8 +38,9 @@ jobs:
           # dependency graph is listed elsewhere and not our concern here.
           grep -oE '^Vulnerability #[0-9]+: (GO-[0-9]{4}-[0-9]+)' report.txt \
             | grep -oE 'GO-[0-9]{4}-[0-9]+' | sort -u > found.txt || true
+          # An empty list is a normal state, and grep exits 1 on no match.
           grep -oE '^GO-[0-9]{4}-[0-9]+' .github/known-vulnerabilities.txt \
-            | sort -u > known.txt
+            | sort -u > known.txt || true
 
           echo "reachable now:"; sed 's/^/  /' found.txt
           echo "known, no fix upstream:"; sed 's/^/  /' known.txt

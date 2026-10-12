@@ -1,15 +1,26 @@
 # DevOps Tools — single container: the Go binary serves both the API and the UI.
 
 # --- 1. build the frontend -------------------------------------------------
-FROM node:20-alpine AS web
+# Node 24 is the LTS line; 20 left support in April 2026.
+FROM node:24-alpine AS web
 WORKDIR /web
-COPY web/package.json ./
-RUN npm install --no-audit --no-fund
+# The lock file, and npm ci rather than npm install: without it the interface
+# was built from whatever the version ranges resolved to on the day, so what
+# shipped was not what npm audit had looked at. The lock records the native
+# bindings of every platform, so the same file serves this image, CI and a
+# developer's machine.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
 # --- 2. build the binary with the UI embedded ------------------------------
-FROM golang:1.26 AS build
+# The patch release is pinned, and is the same one go.mod names. A floating
+# golang:1.26 meant "whichever was newest on release day": 0.25.6 shipped with
+# 1.26.8 because 1.26.9 came out a week later, and nothing said so. Pinned, the
+# weekly scan reads the same standard library this image contains, and turns
+# red when a newer patch fixes something in it — which is the cue to bump both.
+FROM golang:1.26.9 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -26,7 +37,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 
 # --- 3. runtime ------------------------------------------------------------
 # Distroless: no shell, no package manager, runs as a non-root user.
-FROM gcr.io/distroless/static-debian12:nonroot
+#
+# Debian 13 rather than 12: bookworm left regular security support in June
+# 2026 and gets its fixes only through LTS, which reaches the distroless image
+# late — 0.25.6 went out with a tzdata the LTS team had already superseded.
+# The binary is static, so the base contributes only certificates, time zones
+# and the nonroot user, and 65532 is the same user in both.
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/devops-tools /devops-tools
 # The distroless nonroot image starts in /home/nonroot, so the relative default
 # would not find a config mounted at /config. Be explicit instead.

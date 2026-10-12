@@ -7,17 +7,11 @@
 # Remove an entry when a fixed version appears and the dependency is updated —
 # the scan will then be silent about it, and loud again if it comes back.
 #
-# Every one of these is reached only through package initialisation: helm links
-# the code in, and the portal never calls it. That is an assessment, not a
-# guarantee, and it stops holding the day this starts installing charts or
-# verifying their provenance.
-
-# golang.org/x/crypto/openpgp — unmaintained by its authors, no fix planned.
-# Pulled in by helm for chart provenance, which the portal does not use.
-GO-2026-5932
-
-# containerd, three findings in image decompression. Pulled in by helm for OCI
-# registry work, which the portal does not do.
-GO-2026-5622
-GO-2026-5338
-GO-2026-5064
+# Empty since Helm 3.22. The four that used to be here went with the modules
+# that carried them: Helm stopped depending on containerd, and signs charts
+# with github.com/ProtonMail/go-crypto rather than golang.org/x/crypto/openpgp.
+#
+# The x/crypto module is still required, for bcrypt, so scanners that read the
+# module list rather than the code still report GO-2026-5932 against it. That
+# one is answered in .vex/, not here: govulncheck does not report it, because
+# the package is not compiled in, and CI keeps it that way.
