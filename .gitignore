@@ -33,3 +33,6 @@ Thumbs.db
 
 # --- logs ---
 *.log
+
+# Copied into the chart only while a release packages it.
+charts/devops-tools/go.list

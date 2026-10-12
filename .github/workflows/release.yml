@@ -89,6 +89,12 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Package and push the chart
         run: |
+          # The module list goes inside the chart as well as onto the release.
+          # A deployment pipeline already pulls the chart from the registry,
+          # so it can read the list from there without reaching GitHub —
+          # which a corporate network may well not allow. The chart names
+          # exactly one image, through appVersion, so the two cannot disagree.
+          cp go.list charts/devops-tools/go.list
           helm package charts/devops-tools
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
             helm registry login registry-1.docker.io -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
