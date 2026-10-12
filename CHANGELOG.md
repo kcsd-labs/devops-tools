@@ -3,6 +3,15 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.25.8
+
+- Every release carries `go.list`, the modules the binary is built from,
+  generated with the command Sonatype recommends for Nexus IQ. It is attached
+  to the GitHub release and packed inside the chart, so a pipeline that already
+  pulls the chart can evaluate the image without reaching GitHub. Read from
+  `go.sum` instead, a scanner also sees every version the module graph merely
+  mentions — three times as many, none of them built.
+
 ## 0.25.7
 
 - Everything Docker Scout reported against 0.25.6 is fixed. Go 1.26.9 — the
