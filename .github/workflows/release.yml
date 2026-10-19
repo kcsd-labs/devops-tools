@@ -171,7 +171,11 @@ jobs:
           APP: ${{ steps.v.outputs.app }}
           CHART: ${{ steps.v.outputs.chart }}
           REPO: ${{ github.repository }}
-          ACTOR: ${{ github.actor }}
+          # Who the group is told released it: the GitHub login of whoever
+          # pushed the tag, unless the repository variable TG_ANNOUNCED_AS
+          # names somebody else. The login is often not the name colleagues
+          # know; set the variable before tagging, remove it afterwards.
+          ACTOR: ${{ vars.TG_ANNOUNCED_AS || github.actor }}
         run: |
           if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_GROUP_ID" ]; then
             echo "TG_BOT_TOKEN or TG_GROUP_ID is not set; no message sent."
