@@ -3,6 +3,20 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.25.9
+
+- INFR-1802 — LDAP authentication: people sign in with the account they already
+  have, and roles are granted in the portal rather than in a directory.
+- INFR-1839 — the image is published to Docker Hub.
+- INFR-1840 — the chart and the sources are published on GitHub.
+- INFR-1861 — the vulnerabilities reported for the image on Docker Hub are
+  fixed.
+- INFR-1870 — an icon for the browser tab.
+- INFR-1871 — example values files for local accounts, LDAP and OpenID Connect.
+- INFR-1877 — an Audit page: who did what, in the namespaces you may see.
+- INFR-1878 — backup and restore of the access model from the interface.
+- INFR-1755 — Service for managing applications in Kubernetes
+
 ## 0.25.8
 
 - Every release carries `go.list`, the modules the binary is built from,

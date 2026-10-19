@@ -2,8 +2,8 @@ apiVersion: v2
 name: devops-tools
 description: Self-service portal for Kubernetes — logs, metrics, restarts, secrets and Helm releases for developers, without cluster access
 type: application
-version: 0.28.3
-appVersion: "0.25.8"
+version: 0.28.4
+appVersion: "0.25.9"
 keywords:
   - kubernetes
   - self-service
