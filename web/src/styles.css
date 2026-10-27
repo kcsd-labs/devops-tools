@@ -1967,3 +1967,303 @@ a.seg-btn {
   gap: 6px;
   justify-content: flex-end;
 }
+.svc-act-main {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+/* --- Requests ---------------------------------------------------------------
+   Saved and discovered requests on the left, the one being edited and its
+   answer on the right. */
+
+.req-sub {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.req-layout {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .req-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.req-side {
+  padding: 6px 0 10px;
+  max-height: calc(100vh - 190px);
+  overflow: auto;
+}
+.req-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.req-side-head.sub {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.req-side-actions {
+  display: flex;
+  gap: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+}
+.req-side-src {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11.5px;
+}
+.req-side-note {
+  padding: 4px 14px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.req-folder {
+  padding: 6px 14px 2px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.req-folder.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+.req-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.req-item:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.req-item.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-left-color: var(--accent);
+}
+.req-item-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.req-item-name.mono {
+  font-size: 12px;
+}
+.req-m {
+  flex: 0 0 46px;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.m-GET {
+  color: var(--ok);
+}
+.m-POST {
+  color: var(--warn);
+}
+.m-PUT,
+.m-PATCH {
+  color: var(--accent);
+}
+.m-DELETE {
+  color: var(--err);
+}
+.m-HEAD,
+.m-OPTIONS {
+  color: var(--muted);
+}
+.req-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0 4px;
+  visibility: hidden;
+}
+.req-item:hover .req-x,
+.req-header-row .req-x {
+  visibility: visible;
+}
+.req-x:hover {
+  color: var(--err);
+}
+.req-st {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  font-size: 11px;
+}
+.req-st.ok {
+  color: var(--ok);
+}
+.req-st.warn {
+  color: var(--warn);
+}
+.req-st.err {
+  color: var(--err);
+}
+.req-main {
+  min-width: 0;
+}
+.req-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 14px 0;
+}
+.req-meta .input {
+  flex: 0 1 260px;
+}
+.req-dirty {
+  font-size: 12px;
+}
+.req-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px 12px;
+}
+.req-method {
+  flex: none;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  font-weight: 700;
+  padding: 9px 10px;
+}
+.req-url {
+  display: flex;
+  align-items: center;
+  padding: 0 0 0 12px;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+  font-size: 13px;
+  min-width: 0;
+}
+.req-host {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+.req-url input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  padding: 10px 12px 10px 0;
+}
+.req-tabs {
+  margin: 0;
+  padding: 0 8px;
+}
+.req-headers {
+  padding: 10px 14px 14px;
+}
+.req-header-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.req-hint {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.req-body {
+  display: block;
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 12px 16px;
+}
+.req-resp {
+  margin-top: 14px;
+}
+.req-resp-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.req-status {
+  font-weight: 600;
+}
+.req-status.ok {
+  color: var(--ok);
+}
+.req-status.warn {
+  color: var(--warn);
+}
+.req-status.err {
+  color: var(--err);
+}
+.req-resp-tabs {
+  margin-left: auto;
+  display: flex;
+}
+.req-resp-tabs .tab {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.req-resp-error,
+.req-resp-note {
+  padding: 10px 14px 0;
+  font-size: 12.5px;
+}
+.req-resp-error {
+  color: var(--err);
+}
+.req-resp-note {
+  color: var(--warn);
+}
+.req-pre {
+  max-height: 50vh;
+}
+.req-resp-headers td {
+  padding: 6px 14px;
+  font-size: 12px;
+  word-break: break-all;
+}
+.req-copy {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+}
+.req-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--muted);
+}

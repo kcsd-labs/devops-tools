@@ -32,20 +32,22 @@ import (
 // rather than written out in values, so a name the code checks and a name a
 // deployment may grant cannot drift apart.
 const (
-	OpLogs          = config.OpLogs
-	OpDescribe      = config.OpDescribe
-	OpMetrics       = config.OpMetrics
-	OpPodRestart    = config.OpPodRestart
-	OpServiceList   = config.OpServiceList
-	OpHelmList      = config.OpHelmList
-	OpHelmHistory   = config.OpHelmHistory
-	OpHelmRollback  = config.OpHelmRollback
-	OpHelmUninstall = config.OpHelmUninstall
-	OpSecretList    = config.OpSecretList
-	OpSecretRead    = config.OpSecretRead
-	OpSecretCreate  = config.OpSecretCreate
-	OpSecretUpdate  = config.OpSecretUpdate
-	OpSecretDelete  = config.OpSecretDelete
+	OpLogs                = config.OpLogs
+	OpDescribe            = config.OpDescribe
+	OpMetrics             = config.OpMetrics
+	OpPodRestart          = config.OpPodRestart
+	OpServiceList         = config.OpServiceList
+	OpServiceRequest      = config.OpServiceRequest
+	OpServiceRequestWrite = config.OpServiceRequestWrite
+	OpHelmList            = config.OpHelmList
+	OpHelmHistory         = config.OpHelmHistory
+	OpHelmRollback        = config.OpHelmRollback
+	OpHelmUninstall       = config.OpHelmUninstall
+	OpSecretList          = config.OpSecretList
+	OpSecretRead          = config.OpSecretRead
+	OpSecretCreate        = config.OpSecretCreate
+	OpSecretUpdate        = config.OpSecretUpdate
+	OpSecretDelete        = config.OpSecretDelete
 
 	OpAccessRestore = config.OpAccessRestore
 
@@ -245,6 +247,14 @@ func (s *Server) Router() http.Handler {
 
 		// services
 		r.Get(base+"/services", s.requireOp(OpServiceList, s.handleServices))
+		// Requests to one service. Sending a method that writes needs the
+		// stronger grant too, checked in the handler: the method is in the
+		// body, not the route.
+		svc := base + "/services/{name}"
+		r.Get(svc+"/requests", s.requireOp(OpServiceRequest, s.handleRequestCollection))
+		r.Put(svc+"/requests", s.requireOp(OpServiceRequestWrite, s.handleSaveRequests))
+		r.Post(svc+"/send", s.requireOp(OpServiceRequest, s.handleSendRequest))
+		r.Get(svc+"/api-docs", s.requireOp(OpServiceRequest, s.handleServiceAPI))
 
 		// secrets
 		r.Get(base+"/secrets", s.requireOp(OpSecretList, s.handleListSecrets))

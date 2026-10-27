@@ -7,6 +7,7 @@ import { PodDetail } from "./pages/PodDetail";
 import { Helm } from "./pages/Helm";
 import { Secrets } from "./pages/Secrets";
 import { Services } from "./pages/Services";
+import { Requests } from "./pages/Requests";
 import { Users } from "./pages/Users";
 import { Roles } from "./pages/Roles";
 import { Storage } from "./pages/Storage";
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/ns/:namespace/helm" element={<Helm />} />
         <Route path="/secrets" element={<Secrets />} />
         <Route path="/services" element={<Services />} />
+        <Route path="/ns/:namespace/services/:name" element={<Requests />} />
         <Route
           path="/configurations"
           element={

@@ -224,8 +224,62 @@ export interface ServiceList {
   /** Which of a row's actions lead somewhere this person may go. */
   mayLogs: boolean;
   mayHelm: boolean;
+  mayRequest: boolean;
 }
 
+export interface Header {
+  name: string;
+  value: string;
+}
+
+/** A request kept in a service's collection. Secrets are referenced as
+    {{secret:name/key}}, never stored. */
+export interface SavedRequest {
+  id?: string;
+  folder?: string;
+  name: string;
+  method: string;
+  /** Service port; 0 or absent means the first. */
+  port?: number;
+  path: string;
+  headers?: Header[];
+  body?: string;
+}
+
+export interface RequestCollection {
+  collection: {
+    requests: SavedRequest[];
+    /** Sent back with a save, so concurrent saves do not overwrite. */
+    version: string;
+    /** Managed by a chart or GitOps: shown, not changed here. */
+    readOnly: boolean;
+    managedBy?: string;
+  };
+  mayWrite: boolean;
+  /** {{secret:…}} will be filled in for this person. */
+  maySecrets: boolean;
+}
+
+export interface RequestResponse {
+  url: string;
+  status?: number;
+  statusText?: string;
+  ms: number;
+  headers?: Header[];
+  body?: string;
+  base64?: boolean;
+  truncated?: boolean;
+  size: number;
+  /** Why there was no answer. */
+  error?: string;
+}
+
+export interface APIEndpoint {
+  method: string;
+  path: string;
+  summary?: string;
+  tag?: string;
+}
 
 export interface Me {
   username: string;
@@ -374,10 +428,38 @@ export function createApi(token: string | undefined) {
       return getJSON<AuditPage>("/audit" + (qs ? `?${qs}` : ""));
     },
 
-    /** Every service in the namespaces the caller holds service-list in. */
+    /** The namespaces the caller holds service-list in. */
     serviceNamespaces: () => getJSON<{ namespaces: string[] }>("/services"),
     /** The services in one namespace. */
     services: (ns: string) => getJSON<ServiceList>(`/namespaces/${ns}/services`),
+    requestCollection: (ns: string, svc: string) =>
+      getJSON<RequestCollection>(`/namespaces/${ns}/services/${encodeURIComponent(svc)}/requests`),
+    /** Adds, replaces and removes saved requests in one write. */
+    saveRequests: (
+      ns: string,
+      svc: string,
+      change: { version: string; save?: SavedRequest[]; remove?: string[] }
+    ) =>
+      sendJSONFor<RequestCollection["collection"]>(
+        "PUT",
+        `/namespaces/${ns}/services/${encodeURIComponent(svc)}/requests`,
+        change
+      ),
+    sendRequest: (
+      ns: string,
+      svc: string,
+      req: { method: string; port: number; path: string; headers: Header[]; body: string }
+    ) =>
+      sendJSONFor<RequestResponse>(
+        "POST",
+        `/namespaces/${ns}/services/${encodeURIComponent(svc)}/send`,
+        req
+      ),
+    /** The operations the service describes in its OpenAPI document. */
+    serviceApiDocs: (ns: string, svc: string, port: number) =>
+      getJSON<{ source?: string; endpoints: APIEndpoint[] }>(
+        `/namespaces/${ns}/services/${encodeURIComponent(svc)}/api-docs?port=${port}`
+      ),
 
     storage: () => getJSON<StorageStat>("/access/storage"),
     /** The model as a file, for keeping or for moving to another environment. */

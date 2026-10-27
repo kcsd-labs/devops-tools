@@ -52,7 +52,8 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		"clusterDomain": kube.ClusterDomain(),
 		// Which of the row's actions lead somewhere this person may go. A
 		// button that opens onto "forbidden" is worse than no button.
-		"mayLogs": s.authz.Allowed(user.Roles, namespace, OpLogs),
-		"mayHelm": s.authz.Allowed(user.Roles, namespace, OpHelmList),
+		"mayLogs":    s.authz.Allowed(user.Roles, namespace, OpLogs),
+		"mayHelm":    s.authz.Allowed(user.Roles, namespace, OpHelmList),
+		"mayRequest": s.authz.Allowed(user.Roles, namespace, OpServiceRequest),
 	})
 }

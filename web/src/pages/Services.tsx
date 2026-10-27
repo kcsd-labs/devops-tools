@@ -439,6 +439,15 @@ export function Services() {
                     </td>
                     <td>
                       <div className="svc-acts">
+                        {data.mayRequest && !external && (
+                          <Link
+                            className="btn ghost sm svc-act svc-act-main"
+                            to={`/ns/${s.namespace}/services/${s.name}`}
+                            title="Send requests to it, and keep the useful ones"
+                          >
+                            Requests ›
+                          </Link>
+                        )}
                         {data.mayLogs && (s.pods?.length ?? 0) > 0 && (
                           <Link
                             className="btn ghost sm svc-act"

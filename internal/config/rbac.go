@@ -27,16 +27,23 @@ const (
 	OpPodRestart = "pod-restart"
 	// Where the services in a namespace answer: their addresses, ports and how
 	// many pods are ready behind them. Read only.
-	OpServiceList   = "service-list"
-	OpHelmList      = "helm-list"
-	OpHelmHistory   = "helm-history"
-	OpHelmRollback  = "helm-rollback"
-	OpHelmUninstall = "helm-uninstall"
-	OpSecretList    = "secret-list"
-	OpSecretRead    = "secret-read"
-	OpSecretCreate  = "secret-create"
-	OpSecretUpdate  = "secret-update"
-	OpSecretDelete  = "secret-delete"
+	OpServiceList = "service-list"
+	// Sending requests to a service from the portal and reading its saved
+	// ones. Read-only methods only: GET, HEAD, OPTIONS.
+	OpServiceRequest = "service-request"
+	// Sending anything that may change something — POST, PUT, PATCH, DELETE
+	// — and changing the saved requests. Separate, so that an environment
+	// people may look into is not one they may also write to.
+	OpServiceRequestWrite = "service-request-write"
+	OpHelmList            = "helm-list"
+	OpHelmHistory         = "helm-history"
+	OpHelmRollback        = "helm-rollback"
+	OpHelmUninstall       = "helm-uninstall"
+	OpSecretList          = "secret-list"
+	OpSecretRead          = "secret-read"
+	OpSecretCreate        = "secret-create"
+	OpSecretUpdate        = "secret-update"
+	OpSecretDelete        = "secret-delete"
 
 	// Granted per namespace to see what happened there — everyone's actions,
 	// not only the holder's — and globally for the entries that belong to no
@@ -75,7 +82,8 @@ const (
 // NamespaceOperations are granted per namespace.
 func NamespaceOperations() []string {
 	return []string{
-		OpLogs, OpDescribe, OpMetrics, OpPodRestart, OpServiceList,
+		OpLogs, OpDescribe, OpMetrics, OpPodRestart,
+		OpServiceList, OpServiceRequest, OpServiceRequestWrite,
 		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
 		OpAuditRead,
