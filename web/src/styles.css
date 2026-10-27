@@ -1796,11 +1796,6 @@ a.seg-btn {
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.svc-partial {
-  background: var(--warn-bg);
-  color: var(--warn);
-  border-color: var(--warn);
-}
 .svc-toggle {
   background: transparent;
   border: 1px solid var(--border);
@@ -1846,18 +1841,8 @@ a.seg-btn {
   padding: 9px 16px;
   vertical-align: top;
 }
-.svc-table tbody tr:not(.svc-group):hover td {
+.svc-table tbody tr:hover td {
   background: var(--card-hover);
-}
-.svc-group td {
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 600;
-  padding: 7px 16px;
-}
-.svc-group td span {
-  font-weight: 400;
 }
 .svc-name {
   font-weight: 600;
@@ -1972,4 +1957,13 @@ a.seg-btn {
   font-size: 12px;
   text-decoration: none;
   white-space: nowrap;
+}
+.svc-only-ns {
+  font-weight: 600;
+  padding: 0 4px;
+}
+.svc-acts {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
 }

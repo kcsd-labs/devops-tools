@@ -169,9 +169,10 @@ func (s *Server) Router() http.Handler {
 		// caller sees depends on which namespaces they hold audit-read in.
 		r.Get("/audit", s.handleAuditLog)
 
-		// Where services answer, across the caller's namespaces. Gated inside
-		// the handler for the same reason as the trail.
-		r.Get("/services", s.handleServices)
+		// Which namespaces the Services page may offer. Gated inside the
+		// handler: the answer is the namespaces the caller holds service-list
+		// in, and the services themselves are read one namespace at a time.
+		r.Get("/services", s.handleServiceNamespaces)
 
 		// Where the access model lives. The state is readable by whoever may
 		// see the users list; taking a copy or putting one back is a separate
@@ -241,6 +242,9 @@ func (s *Server) Router() http.Handler {
 		r.Get(base+"/helm/releases/{name}/history", s.requireOp(OpHelmHistory, s.handleReleaseHistory))
 		r.Post(base+"/helm/releases/{name}/rollback", s.requireOp(OpHelmRollback, s.handleRollback))
 		r.Delete(base+"/helm/releases/{name}", s.requireOp(OpHelmUninstall, s.handleUninstall))
+
+		// services
+		r.Get(base+"/services", s.requireOp(OpServiceList, s.handleServices))
 
 		// secrets
 		r.Get(base+"/secrets", s.requireOp(OpSecretList, s.handleListSecrets))

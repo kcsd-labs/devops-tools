@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useApi } from "../useApi";
 import type { ServiceInfo, ServiceList, ServicePort } from "../api";
 
 const FULL_NAMES_KEY = "devops-tools.servicesFullNames";
+const NAMESPACE_KEY = "devops-tools.servicesNamespace";
 
 /** The scheme a port speaks, where it says so: in its appProtocol, or in its
     name — "http", "http-metrics", "https" — by the convention most charts
@@ -120,12 +121,23 @@ async function copyText(text: string): Promise<void> {
   if (!ok) throw new Error("copy refused");
 }
 
+/** The namespace this browser last looked at, so coming back lands there. */
+function rememberedNamespace(): string {
+  try {
+    return localStorage.getItem(NAMESPACE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export function Services() {
   const api = useApi();
+  const [params, setParams] = useSearchParams();
+  const [namespaces, setNamespaces] = useState<string[] | null>(null);
   const [data, setData] = useState<ServiceList | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [namespace, setNamespace] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [full, setFull] = useState<boolean>(() => {
     try {
@@ -137,12 +149,47 @@ export function Services() {
   const [copied, setCopied] = useState("");
   const timer = useRef<number>();
 
+  // The namespace is in the address, so a link to a namespace's services can
+  // be passed around; failing that, the one this browser looked at last;
+  // failing that, the first.
+  const asked = params.get("namespace") ?? "";
+  const namespace =
+    namespaces && namespaces.includes(asked)
+      ? asked
+      : namespaces?.includes(rememberedNamespace())
+        ? rememberedNamespace()
+        : (namespaces?.[0] ?? "");
+
   useEffect(() => {
     api
-      .services()
-      .then(setData)
+      .serviceNamespaces()
+      .then((r) => setNamespaces(r.namespaces))
       .catch((e) => setError(String(e?.message ?? e)));
   }, [api]);
+
+  useEffect(() => {
+    if (!namespace) return;
+    try {
+      localStorage.setItem(NAMESPACE_KEY, namespace);
+    } catch {
+      // A remembered preference, nothing more.
+    }
+    let live = true;
+    setLoading(true);
+    setError("");
+    api
+      .services(namespace)
+      .then((d) => live && setData(d))
+      .catch((e) => {
+        if (!live) return;
+        setData(null);
+        setError(String(e?.message ?? e));
+      })
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [api, namespace]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -166,38 +213,22 @@ export function Services() {
   };
 
   // Everything but the problems switch, so its count says how many it would
-  // leave rather than how many there are anywhere.
+  // leave rather than how many there are.
   const matching = useMemo(() => {
     if (!data) return [];
     const q = query.trim().toLowerCase();
     return data.services.filter(
       (s) =>
-        (!namespace || s.namespace === namespace) &&
-        (!q ||
-          s.name.toLowerCase().includes(q) ||
-          s.namespace.toLowerCase().includes(q) ||
-          s.ports.some((p) => String(p.port) === q || (p.name ?? "").toLowerCase().includes(q)))
+        !q ||
+        s.name.toLowerCase().includes(q) ||
+        s.ports.some((p) => String(p.port) === q || (p.name ?? "").toLowerCase().includes(q))
     );
-  }, [data, query, namespace]);
+  }, [data, query]);
 
   const problemCount = useMemo(() => matching.filter(problem).length, [matching]);
   const shown = onlyProblems ? matching.filter(problem) : matching;
-  const logsIn = useMemo(() => new Set(data?.logsIn ?? []), [data]);
-  const helmIn = useMemo(() => new Set(data?.helmIn ?? []), [data]);
-
-  // Grouped by namespace, which the backend has already sorted by.
-  const groups = useMemo(() => {
-    const out: { namespace: string; services: ServiceInfo[] }[] = [];
-    for (const s of shown) {
-      const last = out[out.length - 1];
-      if (last && last.namespace === s.namespace) last.services.push(s);
-      else out.push({ namespace: s.namespace, services: [s] });
-    }
-    return out;
-  }, [shown]);
 
   const domain = data?.clusterDomain || "cluster.local";
-  const many = (data?.namespaces.length ?? 0) > 1;
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   return (
@@ -207,40 +238,40 @@ export function Services() {
           <h1 className="page-title">Services</h1>
           <div className="muted svc-sub">
             How to reach each service from another pod
-            {data &&
-              ` · ${
-                data.namespaces.length <= 3
-                  ? data.namespaces.join(", ")
-                  : plural(data.namespaces.length, "namespace")
-              } · ${plural(data.services.length, "service")}`}
+            {data && !loading && ` · ${plural(data.services.length, "service")}`}
           </div>
         </div>
       </div>
 
       <div className="row svc-toolbar">
-        <input
-          className="input"
-          style={{ minWidth: 220 }}
-          placeholder="Find a service, namespace or port…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {many && (
+        {namespaces && namespaces.length > 1 && (
           <select
             className="input"
-            style={{ flex: "0 0 auto", width: 240 }}
+            style={{ flex: "0 0 auto", width: 260 }}
             value={namespace}
-            onChange={(e) => setNamespace(e.target.value)}
+            onChange={(e) => {
+              setQuery("");
+              setParams({ namespace: e.target.value }, { replace: true });
+            }}
             aria-label="Namespace"
           >
-            <option value="">All my namespaces</option>
-            {data!.namespaces.map((ns) => (
+            {namespaces.map((ns) => (
               <option key={ns} value={ns}>
                 {ns}
               </option>
             ))}
           </select>
         )}
+        {namespaces && namespaces.length === 1 && (
+          <span className="svc-only-ns">{namespace}</span>
+        )}
+        <input
+          className="input"
+          style={{ minWidth: 220 }}
+          placeholder="Find a service or port…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <button
           className={"svc-toggle" + (onlyProblems ? " on" : "")}
           onClick={() => setOnlyProblems((v) => !v)}
@@ -260,19 +291,13 @@ export function Services() {
 
       {error && <div className="alert">{error}</div>}
 
-      {data && data.unreadable.length > 0 && (
-        <div className="alert svc-partial">
-          Could not read {data.unreadable.join(", ")} — the services there are not in this list.
-        </div>
-      )}
+      {(!namespaces || loading) && !error && <div className="muted">Loading…</div>}
 
-      {!data && !error && <div className="muted">Loading…</div>}
-
-      {data && shown.length === 0 && (
+      {data && !loading && shown.length === 0 && (
         <div className="card">
           <p className="muted" style={{ margin: 0 }}>
             {data.services.length === 0
-              ? "There are no services in these namespaces."
+              ? `There are no services in ${namespace}.`
               : onlyProblems && matching.length > 0
                 ? "Nothing here needs looking at."
                 : "No service matches."}
@@ -280,163 +305,154 @@ export function Services() {
         </div>
       )}
 
-      {shown.length > 0 && (
+      {data && !loading && shown.length > 0 && (
         <div className="card no-pad">
           <table className="table svc-table">
             <thead>
               <tr>
                 <th style={{ width: "24%" }}>Service</th>
                 <th>Address</th>
-                <th style={{ width: "18%" }}>Port → pod port</th>
-                <th style={{ width: "8%" }}>Pods</th>
+                <th style={{ width: "16%" }}>Port → pod port</th>
+                <th style={{ width: "7%" }}>Pods</th>
                 <th style={{ width: "1%" }} aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
-              {groups.map((g) => (
-                <Fragment key={g.namespace}>
-                  <tr className="svc-group">
-                    <td colSpan={5}>
-                      {g.namespace} <span>· {plural(g.services.length, "service")}</span>
-                    </td>
-                  </tr>
-                  {g.services.map((s) => {
-                    const external = s.type === "ExternalName";
-                    // A service with no ports still has a name to call;
-                    // headless ones often do.
-                    const ports: (ServicePort | undefined)[] =
-                      external || s.ports.length === 0 ? [undefined] : s.ports;
-                    const n = note(s);
-                    const e = s.endpoints;
-                    return (
-                      <tr key={s.namespace + "/" + s.name}>
-                        <td>
-                          <span className="svc-name">{s.name}</span>
-                          {s.headless && <span className="svc-tag kind">headless</span>}
-                          {external && <span className="svc-tag ext">external</span>}
-                          {(s.type === "NodePort" || s.type === "LoadBalancer") && (
-                            <span className="svc-tag kind">{s.type}</span>
-                          )}
-                          {((s.workloads?.length ?? 0) > 0 || s.release) && (
-                            <div className="svc-owner">
-                              {(s.workloads ?? []).map((w) => (
-                                <span key={w.kind + "/" + w.name}>
-                                  {KIND_SHORT[w.kind] ?? w.kind} <b>{w.name}</b>
-                                </span>
-                              ))}
-                              {s.release && (
-                                <span title={s.chart}>
-                                  helm{" "}
-                                  {helmIn.has(s.namespace) ? (
-                                    <Link className="link" to={`/ns/${s.namespace}/helm`}>
-                                      {s.release}
-                                    </Link>
-                                  ) : (
-                                    <b>{s.release}</b>
-                                  )}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {ports.map((p) => {
-                            const a = addressParts(s, full, domain, p);
-                            const text = addressText(s, full, domain, p);
-                            return (
-                              <div className="svc-addr" key={text}>
-                                <span
-                                  className="mono"
-                                  title={addressText(s, !full, domain, p).replace(a.scheme, "")}
-                                >
-                                  {a.name}
-                                  <span className="svc-ns">{a.rest}</span>
-                                  {a.port}
-                                </span>
-                                <button
-                                  className={"svc-copy" + (copied === text ? " done" : "")}
-                                  onClick={() => copy(text)}
-                                  title={"Copy " + text}
-                                >
-                                  {copied === text ? "✓ copied" : "copy"}
-                                </button>
-                              </div>
-                            );
-                          })}
-                          {s.ports
-                            .filter((p) => p.declared)
-                            .map((p) => (
-                              <div className="svc-note warn" key={"declared/" + p.port}>
-                                ⚠ The pods declare {p.declared!.join(", ")}, not {p.targetPort} — calls
-                                are likely to reach nothing.
-                              </div>
-                            ))}
-                          {n && (
-                            <div className={"svc-note" + (n.warn ? " warn" : "")}>
-                              {n.text}{" "}
-                              {n.pods && (
-                                <Link className="link" to={`/ns/${s.namespace}/pods`}>
-                                  Pods ›
+              {shown.map((s) => {
+                const external = s.type === "ExternalName";
+                // A service with no ports still has a name to call; headless
+                // ones often do.
+                const ports: (ServicePort | undefined)[] =
+                  external || s.ports.length === 0 ? [undefined] : s.ports;
+                const n = note(s);
+                const e = s.endpoints;
+                return (
+                  <tr key={s.namespace + "/" + s.name}>
+                    <td>
+                      <span className="svc-name">{s.name}</span>
+                      {s.headless && <span className="svc-tag kind">headless</span>}
+                      {external && <span className="svc-tag ext">external</span>}
+                      {(s.type === "NodePort" || s.type === "LoadBalancer") && (
+                        <span className="svc-tag kind">{s.type}</span>
+                      )}
+                      {((s.workloads?.length ?? 0) > 0 || s.release) && (
+                        <div className="svc-owner">
+                          {(s.workloads ?? []).map((w) => (
+                            <span key={w.kind + "/" + w.name}>
+                              {KIND_SHORT[w.kind] ?? w.kind} <b>{w.name}</b>
+                            </span>
+                          ))}
+                          {s.release && (
+                            <span title={s.chart}>
+                              helm{" "}
+                              {data.mayHelm ? (
+                                <Link className="link" to={`/ns/${s.namespace}/helm`}>
+                                  {s.release}
                                 </Link>
+                              ) : (
+                                <b>{s.release}</b>
                               )}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {external || s.ports.length === 0 ? (
-                            <div className="mono svc-port">—</div>
-                          ) : (
-                            s.ports.map((p) => {
-                              const t = portText(p);
-                              return (
-                                <div className="mono svc-port" key={p.port + "/" + p.protocol}>
-                                  {t.label && <span className="svc-port-name">{t.label} </span>}
-                                  {p.port}
-                                  {t.target && (
-                                    <>
-                                      {" → "}
-                                      <span className={p.declared ? "warn-text" : ""}>{t.target}</span>
-                                    </>
-                                  )}
-                                  {!t.target && p.declared && (
-                                    <span className="warn-text"> ⚠</span>
-                                  )}
-                                  {t.rest}
-                                </div>
-                              );
-                            })
-                          )}
-                        </td>
-                        <td>
-                          {external ? (
-                            <span className="svc-pods muted">—</span>
-                          ) : !e ? (
-                            <span className="svc-pods muted" title="Could not read the pods behind it">
-                              ?
-                            </span>
-                          ) : (
-                            <span className={"svc-pods" + (notReady(s) ? " warn" : "")}>
-                              <span className={"svc-dot" + (notReady(s) ? " warn" : "")} />
-                              {e.ready} / {e.total}
                             </span>
                           )}
-                        </td>
-                        <td>
-                          {logsIn.has(s.namespace) && (s.pods?.length ?? 0) > 0 && (
-                            <Link
-                              className="btn ghost sm svc-act"
-                              to={`/ns/${s.namespace}/logs?pods=${s.pods!.join(",")}`}
-                              title="Merged logs of the pods behind it"
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {ports.map((p) => {
+                        const a = addressParts(s, full, domain, p);
+                        const text = addressText(s, full, domain, p);
+                        return (
+                          <div className="svc-addr" key={text}>
+                            <span
+                              className="mono"
+                              title={addressText(s, !full, domain, p).replace(a.scheme, "")}
                             >
-                              Logs
+                              {a.name}
+                              <span className="svc-ns">{a.rest}</span>
+                              {a.port}
+                            </span>
+                            <button
+                              className={"svc-copy" + (copied === text ? " done" : "")}
+                              onClick={() => copy(text)}
+                              title={"Copy " + text}
+                            >
+                              {copied === text ? "✓ copied" : "copy"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {s.ports
+                        .filter((p) => p.declared)
+                        .map((p) => (
+                          <div className="svc-note warn" key={"declared/" + p.port}>
+                            ⚠ The pods declare {p.declared!.join(", ")}, not {p.targetPort} — calls
+                            are likely to reach nothing.
+                          </div>
+                        ))}
+                      {n && (
+                        <div className={"svc-note" + (n.warn ? " warn" : "")}>
+                          {n.text}{" "}
+                          {n.pods && (
+                            <Link className="link" to={`/ns/${s.namespace}/pods`}>
+                              Pods ›
                             </Link>
                           )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {external || s.ports.length === 0 ? (
+                        <div className="mono svc-port">—</div>
+                      ) : (
+                        s.ports.map((p) => {
+                          const t = portText(p);
+                          return (
+                            <div className="mono svc-port" key={p.port + "/" + p.protocol}>
+                              {t.label && <span className="svc-port-name">{t.label} </span>}
+                              {p.port}
+                              {t.target && (
+                                <>
+                                  {" → "}
+                                  <span className={p.declared ? "warn-text" : ""}>{t.target}</span>
+                                </>
+                              )}
+                              {!t.target && p.declared && <span className="warn-text"> ⚠</span>}
+                              {t.rest}
+                            </div>
+                          );
+                        })
+                      )}
+                    </td>
+                    <td>
+                      {external ? (
+                        <span className="svc-pods muted">—</span>
+                      ) : !e ? (
+                        <span className="svc-pods muted" title="Could not read the pods behind it">
+                          ?
+                        </span>
+                      ) : (
+                        <span className={"svc-pods" + (notReady(s) ? " warn" : "")}>
+                          <span className={"svc-dot" + (notReady(s) ? " warn" : "")} />
+                          {e.ready} / {e.total}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="svc-acts">
+                        {data.mayLogs && (s.pods?.length ?? 0) > 0 && (
+                          <Link
+                            className="btn ghost sm svc-act"
+                            to={`/ns/${s.namespace}/logs?pods=${s.pods!.join(",")}`}
+                            title="Merged logs of the pods behind it"
+                          >
+                            Logs
+                          </Link>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -3,112 +3,56 @@ package api
 import (
 	"log/slog"
 	"net/http"
-	"sort"
-	"sync"
+
+	"github.com/go-chi/chi/v5"
 
 	"devops-tools/internal/auth"
 	"devops-tools/internal/kube"
 )
 
-// servicesConcurrency bounds how many namespaces are read at once. A wildcard
-// grant can mean every namespace in the cluster, and two calls each.
-const servicesConcurrency = 8
-
-// servicesNamespaces works out which namespaces this caller may list services
-// in: the ones they hold service-list in, or every namespace there is for a
+// handleServiceNamespaces lists the namespaces the Services page may offer:
+// the ones the caller holds service-list in, or every namespace there is for a
 // wildcard grant, less the ones the deployment hides.
-func (s *Server) servicesNamespaces(r *http.Request, user *auth.User) ([]string, error) {
-	granted := s.authz.NamespacesForOp(user.Roles, OpServiceList)
-	if len(granted) == 1 && granted[0] == "*" {
-		return s.kube.ListNamespaces(r.Context(), user.Username, s.cfg.Cluster.HiddenNamespaces)
-	}
-	return granted, nil
-}
-
-// handleServices lists where services answer, across the namespaces the caller
-// holds service-list in.
 //
-// Gated here rather than by requireOp, as the audit page is: the grant is per
-// namespace and the page spans several. Only those namespaces are read at all —
-// what someone cannot see is never fetched, rather than fetched and filtered.
-func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+// Only the names. The page reads one namespace at a time, chosen by the
+// person looking: with dozens of namespaces, reading them all for every visit
+// cost seconds and produced a list nobody could take in.
+func (s *Server) handleServiceNamespaces(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.FromContext(r.Context())
-
-	namespaces, err := s.servicesNamespaces(r, user)
-	if err != nil {
-		http.Error(w, "could not list the namespaces to read: "+err.Error(), http.StatusBadGateway)
-		return
+	namespaces := s.authz.NamespacesForOp(user.Roles, OpServiceList)
+	if len(namespaces) == 1 && namespaces[0] == "*" {
+		all, err := s.kube.ListNamespaces(r.Context(), user.Username, s.cfg.Cluster.HiddenNamespaces)
+		if err != nil {
+			http.Error(w, "could not list the namespaces: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		namespaces = all
 	}
 	if len(namespaces) == 0 {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if want := r.URL.Query().Get("namespace"); want != "" {
-		if !s.authz.Allowed(user.Roles, want, OpServiceList) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		namespaces = []string{want}
-	}
+	writeJSON(w, http.StatusOK, map[string]any{"namespaces": namespaces})
+}
 
-	results := make([][]kube.Service, len(namespaces))
-	failed := make([]bool, len(namespaces))
-	sem := make(chan struct{}, servicesConcurrency)
-	var wg sync.WaitGroup
-	for i, ns := range namespaces {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			svcs, err := s.kube.ListServices(r.Context(), user.Username, ns)
-			if err != nil {
-				// One namespace that cannot be read — removed since it was
-				// granted, or refused — does not empty the page. It is named
-				// beside what could be read instead.
-				slog.Warn("list services", "namespace", ns, "user", user.Username, "err", err)
-				failed[i] = true
-				return
-			}
-			results[i] = svcs
-		}()
-	}
-	wg.Wait()
+// handleServices lists where the services in one namespace answer.
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	namespace := chi.URLParam(r, "namespace")
 
-	out := []kube.Service{}
-	unreadable := []string{}
-	// Where the links on a row lead somewhere this person may go. A link that
-	// opens onto "forbidden" is worse than no link.
-	logsIn, helmIn := []string{}, []string{}
-	for i, ns := range namespaces {
-		if failed[i] {
-			unreadable = append(unreadable, ns)
-			continue
-		}
-		out = append(out, results[i]...)
-		if s.authz.Allowed(user.Roles, ns, OpLogs) {
-			logsIn = append(logsIn, ns)
-		}
-		if s.authz.Allowed(user.Roles, ns, OpHelmList) {
-			helmIn = append(helmIn, ns)
-		}
+	svcs, err := s.kube.ListServices(r.Context(), user.Username, namespace)
+	if err != nil {
+		slog.Warn("list services", "namespace", namespace, "user", user.Username, "err", err)
+		http.Error(w, "could not read the services in "+namespace+": "+err.Error(), http.StatusBadGateway)
+		return
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Namespace != out[j].Namespace {
-			return out[i].Namespace < out[j].Namespace
-		}
-		return out[i].Name < out[j].Name
-	})
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"services": out,
-		// What was read, so the page can say whose services these are — an
-		// incomplete list should read as a scope, not as a fault.
-		"namespaces": namespaces,
-		"unreadable": unreadable,
-		"logsIn":     logsIn,
-		"helmIn":     helmIn,
+		"services": svcs,
 		// The suffix of a fully qualified name on this cluster.
 		"clusterDomain": kube.ClusterDomain(),
+		// Which of the row's actions lead somewhere this person may go. A
+		// button that opens onto "forbidden" is worse than no button.
+		"mayLogs": s.authz.Allowed(user.Roles, namespace, OpLogs),
+		"mayHelm": s.authz.Allowed(user.Roles, namespace, OpHelmList),
 	})
 }

@@ -216,19 +216,16 @@ export interface ServiceInfo {
   chart?: string;
 }
 
+/** The services in one namespace. */
 export interface ServiceList {
   services: ServiceInfo[];
-  /** The namespaces that were read: the caller's scope. */
-  namespaces: string[];
-  /** Granted, but could not be read. */
-  unreadable: string[];
-  /** Where the caller may open logs and Helm releases, so the row offers
-      only the links that lead somewhere. */
-  logsIn: string[];
-  helmIn: string[];
   /** The suffix of a fully qualified name, e.g. "cluster.local". */
   clusterDomain: string;
+  /** Which of a row's actions lead somewhere this person may go. */
+  mayLogs: boolean;
+  mayHelm: boolean;
 }
+
 
 export interface Me {
   username: string;
@@ -378,7 +375,9 @@ export function createApi(token: string | undefined) {
     },
 
     /** Every service in the namespaces the caller holds service-list in. */
-    services: () => getJSON<ServiceList>("/services"),
+    serviceNamespaces: () => getJSON<{ namespaces: string[] }>("/services"),
+    /** The services in one namespace. */
+    services: (ns: string) => getJSON<ServiceList>(`/namespaces/${ns}/services`),
 
     storage: () => getJSON<StorageStat>("/access/storage"),
     /** The model as a file, for keeping or for moving to another environment. */
