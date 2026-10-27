@@ -1955,3 +1955,21 @@ a.seg-btn {
     display: none;
   }
 }
+.svc-owner {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.svc-owner b {
+  font-weight: 500;
+  color: var(--text);
+}
+.svc-act {
+  margin-left: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}

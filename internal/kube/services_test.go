@@ -2,8 +2,10 @@ package kube
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -187,5 +189,75 @@ func TestTheClusterDomainIsReadFromResolvConf(t *testing.T) {
 		if got := clusterDomainFrom(in); got != want {
 			t.Errorf("clusterDomainFrom(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func deployment(name string, podLabels map[string]string, ports ...corev1.ContainerPort) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNS},
+		Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Ports: ports}}},
+		}},
+	}
+}
+
+func TestTheWorkloadAndReleaseBehindAServiceAreNamed(t *testing.T) {
+	got := byName(t,
+		service("api", func(s *corev1.Service) {
+			s.Annotations = map[string]string{"meta.helm.sh/release-name": "payments"}
+			s.Labels = map[string]string{"helm.sh/chart": "payments-2.1.0"}
+		}),
+		deployment("api", map[string]string{"app": "api", "version": "v2"}),
+		deployment("worker", map[string]string{"app": "worker"}),
+	)["api"]
+	if want := []Workload{{Kind: "Deployment", Name: "api"}}; !reflect.DeepEqual(got.Workloads, want) {
+		t.Errorf("workloads = %+v, want %+v", got.Workloads, want)
+	}
+	if got.Release != "payments" || got.Chart != "payments-2.1.0" {
+		t.Errorf("release, chart = %q, %q", got.Release, got.Chart)
+	}
+}
+
+func TestATargetPortThePodsDoNotDeclareIsReported(t *testing.T) {
+	svc := func(target intstr.IntOrString) *corev1.Service {
+		return service("api", func(s *corev1.Service) {
+			s.Spec.Ports = []corev1.ServicePort{{Port: 80, TargetPort: target, Protocol: corev1.ProtocolTCP}}
+		})
+	}
+	pods := map[string]string{"app": "api"}
+	http := corev1.ContainerPort{Name: "http", ContainerPort: 8080}
+
+	cases := []struct {
+		name   string
+		target intstr.IntOrString
+		dep    *appsv1.Deployment
+		want   []string
+	}{
+		{"number not declared", intstr.FromInt32(3000), deployment("api", pods, http), []string{"http 8080"}},
+		{"number declared", intstr.FromInt32(8080), deployment("api", pods, http), nil},
+		{"name declared", intstr.FromString("http"), deployment("api", pods, http), nil},
+		{"name not declared", intstr.FromString("web"), deployment("api", pods, http), []string{"http 8080"}},
+		// Declaring ports is optional, and pods that declare none say nothing.
+		{"nothing declared", intstr.FromInt32(3000), deployment("api", pods), nil},
+		{"no workload found", intstr.FromInt32(3000), deployment("other", map[string]string{"app": "other"}, http), nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := byName(t, svc(c.target), c.dep)["api"].Ports[0].Declared
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("declared = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestThePodsBehindAServiceAreNamed(t *testing.T) {
+	got := byName(t, service("api", nil),
+		slice("api-v4", "api", discoveryv1.AddressTypeIPv4, ep{pod: "api-b", ready: yes()}, ep{pod: "api-a", ready: no()}),
+		slice("api-v6", "api", discoveryv1.AddressTypeIPv6, ep{pod: "api-b", ready: yes()}),
+	)["api"]
+	if want := []string{"api-a", "api-b"}; !reflect.DeepEqual(got.Pods, want) {
+		t.Errorf("pods = %v, want %v", got.Pods, want)
 	}
 }

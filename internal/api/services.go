@@ -77,12 +77,21 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 
 	out := []kube.Service{}
 	unreadable := []string{}
+	// Where the links on a row lead somewhere this person may go. A link that
+	// opens onto "forbidden" is worse than no link.
+	logsIn, helmIn := []string{}, []string{}
 	for i, ns := range namespaces {
 		if failed[i] {
 			unreadable = append(unreadable, ns)
 			continue
 		}
 		out = append(out, results[i]...)
+		if s.authz.Allowed(user.Roles, ns, OpLogs) {
+			logsIn = append(logsIn, ns)
+		}
+		if s.authz.Allowed(user.Roles, ns, OpHelmList) {
+			helmIn = append(helmIn, ns)
+		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Namespace != out[j].Namespace {
@@ -97,6 +106,8 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		// incomplete list should read as a scope, not as a fault.
 		"namespaces": namespaces,
 		"unreadable": unreadable,
+		"logsIn":     logsIn,
+		"helmIn":     helmIn,
 		// The suffix of a fully qualified name on this cluster.
 		"clusterDomain": kube.ClusterDomain(),
 	})

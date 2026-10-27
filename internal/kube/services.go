@@ -4,14 +4,21 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 )
+
+// podsListed caps the pod names sent with a service. They are there to open
+// the logs of what is behind it, and a merged log of more pods than this is not
+// something anyone reads.
+const podsListed = 20
 
 // Service is a Service as the Services page shows it: where it answers, not how
 // it is specified.
@@ -34,6 +41,22 @@ type Service struct {
 	// read: unknown is not the same as none, and the page must not say "0
 	// ready" about a service it simply could not look behind.
 	Endpoints *Endpoints `json:"endpoints,omitempty"`
+	// Pods names the pods behind the service, ready or not, up to podsListed.
+	Pods []string `json:"pods,omitempty"`
+
+	// Workloads are the Deployments, StatefulSets and DaemonSets whose pods
+	// the selector matches: what to look at when the service misbehaves.
+	Workloads []Workload `json:"workloads,omitempty"`
+	// Release and Chart name the Helm release that created the service, from
+	// the annotation and label Helm puts on everything it installs.
+	Release string `json:"release,omitempty"`
+	Chart   string `json:"chart,omitempty"`
+}
+
+// Workload is a controller whose pods a service selects.
+type Workload struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 // ServicePort is one port a service answers on.
@@ -47,6 +70,11 @@ type ServicePort struct {
 	Protocol    string `json:"protocol"`
 	AppProtocol string `json:"appProtocol,omitempty"`
 	NodePort    int32  `json:"nodePort,omitempty"`
+	// Declared lists the ports the selected pods declare, and is set only when
+	// TargetPort is not among them. Declaring a port is informational — a
+	// process may listen on one it never declared — so this is reported as
+	// what the pods say, not as proof that nothing listens.
+	Declared []string `json:"declared,omitempty"`
 }
 
 // Endpoints is how many pods are behind a service, and how many of them may
@@ -75,7 +103,10 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 	// The pods behind each service, read in one call for the namespace rather
 	// than one per service. Not fatal when it fails — a role without access to
 	// EndpointSlices still gets the addresses, which are the point of the page.
+	// The same goes for everything read below it: each fills in a little more,
+	// and none of it is worth losing the list over.
 	counts, cerr := endpointCounts(ctx, cs, namespace)
+	workloads := workloadsIn(ctx, cs, namespace)
 
 	out := make([]Service, 0, len(list.Items))
 	for _, s := range list.Items {
@@ -87,6 +118,12 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 			ExternalName: s.Spec.ExternalName,
 			HasSelector:  len(s.Spec.Selector) > 0,
 			Ports:        make([]ServicePort, 0, len(s.Spec.Ports)),
+			Release:      s.Annotations["meta.helm.sh/release-name"],
+			Chart:        s.Labels["helm.sh/chart"],
+		}
+		selected := selectedBy(s.Spec.Selector, workloads)
+		for _, w := range selected {
+			svc.Workloads = append(svc.Workloads, Workload{Kind: w.kind, Name: w.name})
 		}
 		if svc.Type == "" {
 			svc.Type = string(corev1.ServiceTypeClusterIP)
@@ -102,12 +139,14 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 			if p.AppProtocol != nil {
 				sp.AppProtocol = *p.AppProtocol
 			}
+			sp.Declared = undeclared(sp.TargetPort, selected)
 			svc.Ports = append(svc.Ports, sp)
 		}
 		// An ExternalName service has nothing behind it in the cluster to count.
 		if cerr == nil && s.Spec.Type != corev1.ServiceTypeExternalName {
-			e := counts[s.Name]
-			svc.Endpoints = &e
+			b := counts[s.Name]
+			svc.Endpoints = &b.Endpoints
+			svc.Pods = b.pods
 		}
 		out = append(out, svc)
 	}
@@ -121,12 +160,15 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 // entry in an IPv4 slice and another in an IPv6 slice, and counting records
 // would report twice the pods there are. An endpoint whose readiness is not
 // stated counts as ready, as the API asks consumers to treat it.
-func endpointCounts(ctx context.Context, cs kubernetes.Interface, namespace string) (map[string]Endpoints, error) {
+func endpointCounts(ctx context.Context, cs kubernetes.Interface, namespace string) (map[string]behind, error) {
 	slices, err := cs.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	type seen struct{ ready bool }
+	type seen struct {
+		ready bool
+		name  string
+	}
 	pods := map[string]map[string]seen{} // service -> pod -> readiness
 	for _, sl := range slices.Items {
 		svc := sl.Labels[discoveryv1.LabelServiceName]
@@ -143,21 +185,121 @@ func endpointCounts(ctx context.Context, cs kubernetes.Interface, namespace stri
 			}
 			ready := ep.Conditions.Ready == nil || *ep.Conditions.Ready
 			// Ready in either family is ready.
-			pods[svc][key] = seen{ready: ready || pods[svc][key].ready}
+			name := ""
+			if ep.TargetRef != nil && ep.TargetRef.Kind == "Pod" {
+				name = ep.TargetRef.Name
+			}
+			pods[svc][key] = seen{ready: ready || pods[svc][key].ready, name: name}
 		}
 	}
-	out := make(map[string]Endpoints, len(pods))
+	out := make(map[string]behind, len(pods))
 	for svc, byPod := range pods {
-		var e Endpoints
+		var b behind
 		for _, p := range byPod {
-			e.Total++
+			b.Total++
 			if p.ready {
-				e.Ready++
+				b.Ready++
+			}
+			if p.name != "" {
+				b.pods = append(b.pods, p.name)
 			}
 		}
-		out[svc] = e
+		sort.Strings(b.pods)
+		if len(b.pods) > podsListed {
+			b.pods = b.pods[:podsListed]
+		}
+		out[svc] = b
 	}
 	return out, nil
+}
+
+// behind is what endpointCounts finds behind one service.
+type behind struct {
+	Endpoints
+	pods []string
+}
+
+// workload is a controller and the pods it makes, as far as a service's
+// selector and ports are concerned.
+type workload struct {
+	kind, name string
+	labels     map[string]string
+	ports      []corev1.ContainerPort
+}
+
+// workloadsIn lists the controllers in a namespace. A kind that cannot be read
+// is skipped: the owners are a convenience on the page, not its point.
+func workloadsIn(ctx context.Context, cs kubernetes.Interface, namespace string) []workload {
+	var out []workload
+	add := func(kind, name string, tpl corev1.PodTemplateSpec) {
+		w := workload{kind: kind, name: name, labels: tpl.Labels}
+		for _, c := range tpl.Spec.Containers {
+			w.ports = append(w.ports, c.Ports...)
+		}
+		out = append(out, w)
+	}
+	if l, err := cs.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, d := range l.Items {
+			add("Deployment", d.Name, d.Spec.Template)
+		}
+	}
+	if l, err := cs.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, d := range l.Items {
+			add("StatefulSet", d.Name, d.Spec.Template)
+		}
+	}
+	if l, err := cs.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, d := range l.Items {
+			add("DaemonSet", d.Name, d.Spec.Template)
+		}
+	}
+	return out
+}
+
+// selectedBy returns the workloads whose pods a service selector matches.
+func selectedBy(selector map[string]string, ws []workload) []workload {
+	if len(selector) == 0 {
+		return nil
+	}
+	sel := labels.SelectorFromSet(selector)
+	var out []workload
+	for _, w := range ws {
+		if sel.Matches(labels.Set(w.labels)) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// undeclared returns the ports the selected pods declare when target is not
+// one of them, and nil otherwise — including when there is nothing to compare
+// against: no workload found, or pods that declare no ports at all, which is
+// common and says nothing.
+func undeclared(target string, ws []workload) []string {
+	if target == "" || target == "0" {
+		return nil
+	}
+	n, err := strconv.Atoi(target)
+	numeric := err == nil
+	seen := map[string]bool{}
+	var declared []string
+	for _, w := range ws {
+		for _, p := range w.ports {
+			if (numeric && int(p.ContainerPort) == n) || (!numeric && p.Name == target) {
+				return nil
+			}
+			d := strconv.Itoa(int(p.ContainerPort))
+			if p.Name != "" {
+				d = p.Name + " " + d
+			}
+			if !seen[d] {
+				seen[d] = true
+				declared = append(declared, d)
+			}
+		}
+	}
+	sort.Strings(declared)
+	return declared
 }
 
 // endpointKey names the pod an endpoint belongs to, or failing that its first

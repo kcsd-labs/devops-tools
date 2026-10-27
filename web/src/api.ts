@@ -188,6 +188,9 @@ export interface ServicePort {
   protocol: string;
   appProtocol?: string;
   nodePort?: number;
+  /** The ports the pods declare, present only when targetPort is not one of
+      them. What the pods say, not proof that nothing listens. */
+  declared?: string[];
 }
 
 /** A service as the Services page shows it: where it answers. */
@@ -204,6 +207,13 @@ export interface ServiceInfo {
   /** Pods behind the service. Absent when they could not be read — which is
       not the same as none. */
   endpoints?: { ready: number; total: number };
+  /** The pods behind it, ready or not, at most twenty. */
+  pods?: string[];
+  /** The controllers whose pods the selector matches. */
+  workloads?: { kind: string; name: string }[];
+  /** The Helm release that installed it, and its chart label. */
+  release?: string;
+  chart?: string;
 }
 
 export interface ServiceList {
@@ -212,6 +222,10 @@ export interface ServiceList {
   namespaces: string[];
   /** Granted, but could not be read. */
   unreadable: string[];
+  /** Where the caller may open logs and Helm releases, so the row offers
+      only the links that lead somewhere. */
+  logsIn: string[];
+  helmIn: string[];
   /** The suffix of a fully qualified name, e.g. "cluster.local". */
   clusterDomain: string;
 }

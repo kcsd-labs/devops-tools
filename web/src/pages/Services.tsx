@@ -42,12 +42,12 @@ function addressText(s: ServiceInfo, full: boolean, domain: string, p?: ServiceP
 /** The port called and the port the pod listens on, side by side: the two
     differing — and one of them being wrong — is the commonest reason a call
     goes nowhere. */
-function portText(p: ServicePort): { label: string; ports: string } {
-  let ports =
-    p.targetPort && p.targetPort !== String(p.port) ? `${p.port} → ${p.targetPort}` : `${p.port}`;
-  if (p.protocol && p.protocol !== "TCP") ports += ` ${p.protocol}`;
-  if (p.nodePort) ports += ` · node ${p.nodePort}`;
-  return { label: p.name ?? "", ports };
+function portText(p: ServicePort): { label: string; target: string; rest: string } {
+  const target = p.targetPort && p.targetPort !== String(p.port) ? p.targetPort : "";
+  let rest = "";
+  if (p.protocol && p.protocol !== "TCP") rest += ` ${p.protocol}`;
+  if (p.nodePort) rest += ` · node ${p.nodePort}`;
+  return { label: p.name ?? "", target, rest };
 }
 
 /** Calls to it will fail, or some of them will. Unknown counts are not a
@@ -58,6 +58,18 @@ function notReady(s: ServiceInfo): boolean {
   if (e.total === 0) return s.hasSelector;
   return e.ready < e.total;
 }
+
+/** Something on the row needs looking at: pods that are not ready, or a port
+    the pods do not declare. */
+function problem(s: ServiceInfo): boolean {
+  return notReady(s) || s.ports.some((p) => p.declared);
+}
+
+const KIND_SHORT: Record<string, string> = {
+  Deployment: "deploy",
+  StatefulSet: "sts",
+  DaemonSet: "ds",
+};
 
 /** What a row needs said under its address, if anything. */
 function note(s: ServiceInfo): { text: string; warn: boolean; pods: boolean } | null {
@@ -114,7 +126,7 @@ export function Services() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [namespace, setNamespace] = useState("");
-  const [onlyNotReady, setOnlyNotReady] = useState(false);
+  const [onlyProblems, setOnlyProblems] = useState(false);
   const [full, setFull] = useState<boolean>(() => {
     try {
       return localStorage.getItem(FULL_NAMES_KEY) === "1";
@@ -153,7 +165,7 @@ export function Services() {
     }
   };
 
-  // Everything but the not-ready switch, so its count says how many it would
+  // Everything but the problems switch, so its count says how many it would
   // leave rather than how many there are anywhere.
   const matching = useMemo(() => {
     if (!data) return [];
@@ -168,8 +180,10 @@ export function Services() {
     );
   }, [data, query, namespace]);
 
-  const notReadyCount = useMemo(() => matching.filter(notReady).length, [matching]);
-  const shown = onlyNotReady ? matching.filter(notReady) : matching;
+  const problemCount = useMemo(() => matching.filter(problem).length, [matching]);
+  const shown = onlyProblems ? matching.filter(problem) : matching;
+  const logsIn = useMemo(() => new Set(data?.logsIn ?? []), [data]);
+  const helmIn = useMemo(() => new Set(data?.helmIn ?? []), [data]);
 
   // Grouped by namespace, which the backend has already sorted by.
   const groups = useMemo(() => {
@@ -228,11 +242,11 @@ export function Services() {
           </select>
         )}
         <button
-          className={"svc-toggle" + (onlyNotReady ? " on" : "")}
-          onClick={() => setOnlyNotReady((v) => !v)}
-          title="Only services that have pods behind them which are not ready"
+          className={"svc-toggle" + (onlyProblems ? " on" : "")}
+          onClick={() => setOnlyProblems((v) => !v)}
+          title="Only services with pods that are not ready, or a port the pods do not declare"
         >
-          Not ready only <b className={notReadyCount ? "warn" : ""}>{notReadyCount}</b>
+          Problems only <b className={problemCount ? "warn" : ""}>{problemCount}</b>
         </button>
         <div className="svc-seg" role="group" aria-label="Address form">
           <button className={full ? "" : "on"} onClick={() => setFull(false)}>
@@ -259,8 +273,8 @@ export function Services() {
           <p className="muted" style={{ margin: 0 }}>
             {data.services.length === 0
               ? "There are no services in these namespaces."
-              : onlyNotReady && matching.length > 0
-                ? "Every service here has its pods ready."
+              : onlyProblems && matching.length > 0
+                ? "Nothing here needs looking at."
                 : "No service matches."}
           </p>
         </div>
@@ -273,15 +287,16 @@ export function Services() {
               <tr>
                 <th style={{ width: "24%" }}>Service</th>
                 <th>Address</th>
-                <th style={{ width: "20%" }}>Port → pod port</th>
-                <th style={{ width: "10%" }}>Pods</th>
+                <th style={{ width: "18%" }}>Port → pod port</th>
+                <th style={{ width: "8%" }}>Pods</th>
+                <th style={{ width: "1%" }} aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {groups.map((g) => (
                 <Fragment key={g.namespace}>
                   <tr className="svc-group">
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       {g.namespace} <span>· {plural(g.services.length, "service")}</span>
                     </td>
                   </tr>
@@ -301,6 +316,27 @@ export function Services() {
                           {external && <span className="svc-tag ext">external</span>}
                           {(s.type === "NodePort" || s.type === "LoadBalancer") && (
                             <span className="svc-tag kind">{s.type}</span>
+                          )}
+                          {((s.workloads?.length ?? 0) > 0 || s.release) && (
+                            <div className="svc-owner">
+                              {(s.workloads ?? []).map((w) => (
+                                <span key={w.kind + "/" + w.name}>
+                                  {KIND_SHORT[w.kind] ?? w.kind} <b>{w.name}</b>
+                                </span>
+                              ))}
+                              {s.release && (
+                                <span title={s.chart}>
+                                  helm{" "}
+                                  {helmIn.has(s.namespace) ? (
+                                    <Link className="link" to={`/ns/${s.namespace}/helm`}>
+                                      {s.release}
+                                    </Link>
+                                  ) : (
+                                    <b>{s.release}</b>
+                                  )}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td>
@@ -327,6 +363,14 @@ export function Services() {
                               </div>
                             );
                           })}
+                          {s.ports
+                            .filter((p) => p.declared)
+                            .map((p) => (
+                              <div className="svc-note warn" key={"declared/" + p.port}>
+                                ⚠ The pods declare {p.declared!.join(", ")}, not {p.targetPort} — calls
+                                are likely to reach nothing.
+                              </div>
+                            ))}
                           {n && (
                             <div className={"svc-note" + (n.warn ? " warn" : "")}>
                               {n.text}{" "}
@@ -347,7 +391,17 @@ export function Services() {
                               return (
                                 <div className="mono svc-port" key={p.port + "/" + p.protocol}>
                                   {t.label && <span className="svc-port-name">{t.label} </span>}
-                                  {t.ports}
+                                  {p.port}
+                                  {t.target && (
+                                    <>
+                                      {" → "}
+                                      <span className={p.declared ? "warn-text" : ""}>{t.target}</span>
+                                    </>
+                                  )}
+                                  {!t.target && p.declared && (
+                                    <span className="warn-text"> ⚠</span>
+                                  )}
+                                  {t.rest}
                                 </div>
                               );
                             })
@@ -365,6 +419,17 @@ export function Services() {
                               <span className={"svc-dot" + (notReady(s) ? " warn" : "")} />
                               {e.ready} / {e.total}
                             </span>
+                          )}
+                        </td>
+                        <td>
+                          {logsIn.has(s.namespace) && (s.pods?.length ?? 0) > 0 && (
+                            <Link
+                              className="btn ghost sm svc-act"
+                              to={`/ns/${s.namespace}/logs?pods=${s.pods!.join(",")}`}
+                              title="Merged logs of the pods behind it"
+                            >
+                              Logs
+                            </Link>
                           )}
                         </td>
                       </tr>
