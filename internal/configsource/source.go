@@ -61,3 +61,28 @@ type Source interface {
 	// means the entry is expected not to exist yet.
 	Put(ctx context.Context, path, content, version string, by Editor) error
 }
+
+// Revisioned is a source that keeps history and can point at one version of a
+// file. Git can: a version is a commit, and the commit page shows exactly what
+// changed, behind the repository's own permissions. Consul keeps no history,
+// so there is nothing to point at.
+//
+// Optional, asked for with RevisionURL, so that a source without history needs
+// nothing written for it.
+type Revisioned interface {
+	RevisionURL(version string) string
+}
+
+// RevisionURL returns the page showing version, or "" when src keeps no
+// history to show.
+func RevisionURL(src Source, version string) string {
+	if r, ok := src.(Revisioned); ok && version != "" {
+		return r.RevisionURL(version)
+	}
+	return ""
+}
+
+// SameContent reports whether two versions of a file are the same, ignoring
+// how they end — the rule the drift check uses. A synchroniser that drops the
+// final newline would otherwise make identical files look different.
+func SameContent(a, b string) bool { return sameConfig(a, b) }

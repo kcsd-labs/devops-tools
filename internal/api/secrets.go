@@ -8,6 +8,7 @@ import (
 
 	"devops-tools/internal/audit"
 	"devops-tools/internal/auth"
+	"devops-tools/internal/changes"
 )
 
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
@@ -61,10 +62,14 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.kube.CreateSecret(r.Context(), user.Username, namespace, body.Name, body.Type, body.Data)
+	var detail string
+	if err == nil {
+		detail = changes.Keys(nil, body.Data)
+	}
 	s.audit.Log(audit.Entry{
 		User: user.Username, Environment: s.cfg.Environment, Namespace: namespace,
 		Operation: OpSecretCreate, Target: body.Name, Allowed: true,
-		Success: err == nil, Error: errStr(err),
+		Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -84,11 +89,11 @@ func (s *Server) handleUpdateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.kube.UpdateSecret(r.Context(), user.Username, namespace, name, body.Data)
+	detail, err := s.kube.UpdateSecret(r.Context(), user.Username, namespace, name, body.Data)
 	s.audit.Log(audit.Entry{
 		User: user.Username, Environment: s.cfg.Environment, Namespace: namespace,
 		Operation: OpSecretUpdate, Target: name, Allowed: true,
-		Success: err == nil, Error: errStr(err),
+		Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -102,11 +107,11 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	err := s.kube.DeleteSecret(r.Context(), user.Username, namespace, name)
+	detail, err := s.kube.DeleteSecret(r.Context(), user.Username, namespace, name)
 	s.audit.Log(audit.Entry{
 		User: user.Username, Environment: s.cfg.Environment, Namespace: namespace,
 		Operation: OpSecretDelete, Target: name, Allowed: true,
-		Success: err == nil, Error: errStr(err),
+		Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

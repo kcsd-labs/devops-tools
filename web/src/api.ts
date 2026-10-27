@@ -79,6 +79,9 @@ export interface AuditEntry {
   allowed: boolean;
   success: boolean;
   error: string;
+  /** What the action changed — which keys, which settings, the commit — never
+      what they were changed to. Empty on records written before it existed. */
+  detail: string;
 }
 
 export interface AuditPage {

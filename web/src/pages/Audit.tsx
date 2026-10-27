@@ -48,6 +48,22 @@ function when(iso: string): string {
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
+/** A detail as text, with the commit it names made clickable: the commit holds
+    the change in full, behind the repository's own permissions, and is where a
+    reviewer who needs the values goes next. Only http(s) addresses become
+    links; anything else stays text. */
+function linked(detail: string) {
+  return detail.split(/(https?:\/\/\S+)/).map((part, i) =>
+    /^https?:\/\//.test(part) ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer">
+        {part}
+      </a>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    )
+  );
+}
+
 export function Audit() {
   const api = useApi();
   const apiRef = useRef(api);
@@ -236,9 +252,9 @@ export function Audit() {
                     <tr>
                       <td colSpan={6}>
                         <div className="console">
-                          {e.error
-                            ? e.error
-                            : "No further detail was recorded for this action."}
+                          {e.detail && <div>{linked(e.detail)}</div>}
+                          {e.error && <div>{e.error}</div>}
+                          {!e.detail && !e.error && "No further detail was recorded for this action."}
                         </div>
                       </td>
                     </tr>

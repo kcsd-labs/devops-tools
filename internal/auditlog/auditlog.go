@@ -261,7 +261,9 @@ func keep(e audit.Entry, sc Scope, f Filter) bool {
 		return false
 	}
 	if f.Text != "" {
-		hay := strings.ToLower(e.User + " " + e.Namespace + " " + e.Operation + " " + e.Target + " " + e.Error)
+		// The detail too: "who touched DB_PASSWORD" is a search for a key name,
+		// and the key name is only ever in the detail.
+		hay := strings.ToLower(e.User + " " + e.Namespace + " " + e.Operation + " " + e.Target + " " + e.Error + " " + e.Detail)
 		if !strings.Contains(hay, strings.ToLower(f.Text)) {
 			return false
 		}

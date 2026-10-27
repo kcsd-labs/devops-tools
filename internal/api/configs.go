@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"devops-tools/internal/audit"
 	"devops-tools/internal/auth"
+	"devops-tools/internal/changes"
 	"devops-tools/internal/configsource"
 )
 
@@ -174,11 +176,16 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	editor := configsource.Editor{Username: user.Username, Email: user.Email}
 	target := s.configs.Kind() + ":" + path
 
-	var err error
-	if side := r.URL.Query().Get("source"); side != "" {
+	// Which source the save goes to: the whole of it ordinarily, one side of a
+	// pair on the emergency path. Read before writing, so that the record can
+	// say what changed.
+	side := r.URL.Query().Get("source")
+	written := s.configs
+	if side != "" {
 		d, ok := s.configs.(configsource.Dual)
 		if !ok {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -186,10 +193,18 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if one, ok := d.Side(side); ok {
+			written = one
+		}
+	}
+	before, berr := written.Get(ctx, path)
+
+	var err error
+	if side != "" {
 		// The emergency path: Consul alone, leaving the repository behind. It is
 		// recorded as its own operation so that it stands out in the audit trail
 		// — the point of it is that it deliberately creates a difference.
-		err = d.PutSide(r.Context(), side, path, body.Content, editor)
+		err = s.configs.(configsource.Dual).PutSide(ctx, side, path, body.Content, editor)
 		target = "consul-only:" + path
 	} else {
 		// What Consul held before being overwritten. Described, never quoted:
@@ -197,9 +212,28 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		// that reproduces them turns every reader of the log into someone who
 		// has seen every credential in the estate.
 		if d, ok := s.configs.(configsource.Dual); ok {
-			target += " (consul was " + d.SecondaryState(r.Context(), path, body.Content) + ")"
+			target += " (consul was " + d.SecondaryState(ctx, path, body.Content) + ")"
 		}
-		err = s.configs.Put(r.Context(), path, body.Content, body.Version, editor)
+		err = s.configs.Put(ctx, path, body.Content, body.Version, editor)
+	}
+
+	// What changed, by the same rule: which settings, never what they became.
+	// Where the source keeps history, the commit is named as well — it holds
+	// the change in full, behind the repository's own permissions, which is
+	// the right place for anyone who needs the values to look.
+	var detail string
+	if err == nil || errors.Is(err, configsource.ErrSecondaryLagging) {
+		if berr == nil || errors.Is(berr, configsource.ErrNotFound) {
+			detail = changes.Document(path, before.Content, body.Content, berr == nil)
+		}
+		if side == "" {
+			if url := s.commitURL(ctx, path, body.Content); url != "" {
+				if detail != "" {
+					detail += " · "
+				}
+				detail += url
+			}
+		}
 	}
 
 	// Recorded whether it succeeded or not: a change to what a service runs
@@ -207,7 +241,7 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	s.audit.Log(audit.Entry{
 		User: user.Username, Environment: s.cfg.Environment, Namespace: "-",
 		Operation: OpConfigWrite, Target: target,
-		Allowed: true, Success: err == nil, Error: errStr(err),
+		Allowed: true, Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 
 	switch {
@@ -228,6 +262,23 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 	}
+}
+
+// commitURL points at the commit a save has just made, when the source keeps
+// history. Read back rather than taken from the write: GitLab's file API
+// answers a write with the path and the branch, not the commit. Checked
+// against what was written, so that a commit somebody else landed a moment
+// later is not passed off as this one.
+func (s *Server) commitURL(ctx context.Context, path, content string) string {
+	// A source without history has nothing to point at; spare it the read.
+	if configsource.RevisionURL(s.configs, "probe") == "" {
+		return ""
+	}
+	f, err := s.configs.Get(ctx, path)
+	if err != nil || !configsource.SameContent(f.Content, content) {
+		return ""
+	}
+	return configsource.RevisionURL(s.configs, f.Version)
 }
 
 // configRequest resolves the caller and the requested path, and checks the

@@ -103,6 +103,10 @@ func (c *Cached) refresh() {
 	c.entries, c.at = fresh, time.Now()
 }
 
+// RevisionURL passes through: the cache only holds listings, and an embedded
+// interface does not carry the optional methods of what it wraps.
+func (c *Cached) RevisionURL(version string) string { return RevisionURL(c.Source, version) }
+
 func (c *Cached) Put(ctx context.Context, path, content, version string, by Editor) error {
 	err := c.Source.Put(ctx, path, content, version, by)
 	if err == nil {

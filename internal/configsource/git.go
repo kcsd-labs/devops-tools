@@ -107,6 +107,12 @@ func (g *Git) Put(ctx context.Context, rel, content, version string, by Editor) 
 	return err
 }
 
+// RevisionURL is the commit's page in GitLab. A version here is the last commit
+// that touched the file, so this is the page showing the change itself.
+func (g *Git) RevisionURL(version string) string {
+	return g.cl.Base() + "/" + g.project + "/-/commit/" + version
+}
+
 // commitMessage names the file and who changed it. Whoever runs `git log` on
 // this repository is usually asking when a setting changed and on whose
 // authority, and the portal is the only place that knows the second part.

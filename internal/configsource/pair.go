@@ -99,6 +99,9 @@ func (p *Pair) List(ctx context.Context) ([]Entry, error) { return p.git.List(ct
 
 func (p *Pair) Get(ctx context.Context, path string) (File, error) { return p.git.Get(ctx, path) }
 
+// RevisionURL comes from the repository: a version of a pair is a commit.
+func (p *Pair) RevisionURL(version string) string { return RevisionURL(p.git, version) }
+
 // Put commits to the repository, then writes Consul.
 //
 // In that order, deliberately. Consul first would mean a change that is live

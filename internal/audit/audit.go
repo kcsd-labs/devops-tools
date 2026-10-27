@@ -35,6 +35,11 @@ type Entry struct {
 	Allowed     bool
 	Success     bool
 	Error       string
+	// Detail says what the action changed — which keys, which settings, which
+	// commit — and never what they were changed to. Build it with package
+	// changes: this line goes into the logs and to everyone with audit-read,
+	// and a value written here is a value published.
+	Detail string
 }
 
 // Recorder writes actions to the log and the metrics registry.
@@ -50,7 +55,7 @@ func (r *Recorder) Log(e Entry) {
 	slog.Info(actionMsg,
 		"user", e.User, "environment", e.Environment, "namespace", e.Namespace,
 		"operation", e.Operation, "target", e.Target,
-		"allowed", e.Allowed, "success", e.Success, "error", e.Error)
+		"allowed", e.Allowed, "success", e.Success, "error", e.Error, "detail", e.Detail)
 
 	operationsTotal.WithLabelValues(
 		e.Environment, e.Namespace, e.Operation,
@@ -79,6 +84,8 @@ func Parse(line []byte) (Entry, bool) {
 		Allowed     bool      `json:"allowed"`
 		Success     bool      `json:"success"`
 		Error       string    `json:"error"`
+		// Absent from lines written before it existed, which read as empty.
+		Detail string `json:"detail"`
 	}
 	if err := json.Unmarshal(line, &raw); err != nil || raw.Msg != actionMsg {
 		return Entry{}, false
@@ -86,6 +93,6 @@ func Parse(line []byte) (Entry, bool) {
 	return Entry{
 		Time: raw.Time, User: raw.User, Environment: raw.Environment,
 		Namespace: raw.Namespace, Operation: raw.Operation, Target: raw.Target,
-		Allowed: raw.Allowed, Success: raw.Success, Error: raw.Error,
+		Allowed: raw.Allowed, Success: raw.Success, Error: raw.Error, Detail: raw.Detail,
 	}, true
 }

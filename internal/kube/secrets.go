@@ -5,6 +5,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"devops-tools/internal/changes"
 )
 
 // SecretSummary describes a secret without revealing anything: name, type and
@@ -91,26 +93,53 @@ func (m *Manager) CreateSecret(ctx context.Context, asUser, namespace, name, sec
 
 // UpdateSecret replaces the whole content of a secret: keys absent from data
 // are removed, not kept.
-func (m *Manager) UpdateSecret(ctx context.Context, asUser, namespace, name string, data map[string]string) error {
+//
+// It returns which keys were added, changed and removed, for the audit record.
+// Names only — see package changes. The old values are read here anyway, to be
+// replaced, so the comparison costs nothing.
+func (m *Manager) UpdateSecret(ctx context.Context, asUser, namespace, name string, data map[string]string) (string, error) {
 	cs, err := m.Clientset(asUser)
 	if err != nil {
-		return err
+		return "", err
 	}
 	s, err := cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return err
+		return "", err
+	}
+	before := make(map[string]string, len(s.Data))
+	for k, v := range s.Data {
+		before[k] = string(v)
 	}
 	s.Data = nil        // drop the previous values
 	s.StringData = data // and set the new ones
-	_, err = cs.CoreV1().Secrets(namespace).Update(ctx, s, metav1.UpdateOptions{})
-	return err
+	if _, err := cs.CoreV1().Secrets(namespace).Update(ctx, s, metav1.UpdateOptions{}); err != nil {
+		return "", err
+	}
+	return changes.Keys(before, data), nil
 }
 
-// DeleteSecret removes a secret.
-func (m *Manager) DeleteSecret(ctx context.Context, asUser, namespace, name string) error {
+// DeleteSecret removes a secret, and returns which keys it held.
+//
+// "What was in it" is the first question asked about a deletion afterwards, and
+// the one nothing can answer once it has happened. The keys are read on a best
+// effort basis: somebody allowed to delete a secret may not be allowed to read
+// it, and that must not stop the deletion.
+func (m *Manager) DeleteSecret(ctx context.Context, asUser, namespace, name string) (string, error) {
 	cs, err := m.Clientset(asUser)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return cs.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	var detail string
+	if s, gerr := cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{}); gerr == nil {
+		// Names only; the values are not needed to say what was removed.
+		held := make(map[string]string, len(s.Data))
+		for k := range s.Data {
+			held[k] = ""
+		}
+		detail = changes.Keys(held, nil)
+	}
+	if err := cs.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		return "", err
+	}
+	return detail, nil
 }
