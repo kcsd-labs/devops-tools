@@ -67,6 +67,12 @@ rules:
     resources: ["ingresses"]
     verbs: ["get", "list", "watch"]
 
+  # The Services page counts the pods behind each service. Without this it still
+  # shows the addresses, with the counts left unknown.
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+
   # Uninstalling a Helm release deletes whatever that release created. These are
   # the usual kinds; add your own under rbac.extraRules for anything else,
   # especially custom resources — without them an uninstall leaves orphans.

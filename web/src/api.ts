@@ -37,6 +37,8 @@ export interface Capabilities {
   configurations: boolean;
   /** A trail can be read at all, AND the caller holds audit-read somewhere. */
   audit: boolean;
+  /** The caller holds service-list in at least one namespace. */
+  services: boolean;
   /** May take a snapshot of the access model, and put one back. */
   accessRestore: boolean;
 }
@@ -175,6 +177,43 @@ export interface PortalUser {
 export interface NamespaceList {
   namespaces: string[];
   wildcard: boolean;
+}
+
+/** One port a service answers on. */
+export interface ServicePort {
+  name?: string;
+  port: number;
+  /** Where the pod listens: a number, or the name of a port in the pod spec. */
+  targetPort: string;
+  protocol: string;
+  appProtocol?: string;
+  nodePort?: number;
+}
+
+/** A service as the Services page shows it: where it answers. */
+export interface ServiceInfo {
+  name: string;
+  namespace: string;
+  /** ClusterIP, NodePort, LoadBalancer or ExternalName. */
+  type: string;
+  headless: boolean;
+  /** The outside host an ExternalName service stands for. */
+  externalName?: string;
+  ports: ServicePort[];
+  hasSelector: boolean;
+  /** Pods behind the service. Absent when they could not be read — which is
+      not the same as none. */
+  endpoints?: { ready: number; total: number };
+}
+
+export interface ServiceList {
+  services: ServiceInfo[];
+  /** The namespaces that were read: the caller's scope. */
+  namespaces: string[];
+  /** Granted, but could not be read. */
+  unreadable: string[];
+  /** The suffix of a fully qualified name, e.g. "cluster.local". */
+  clusterDomain: string;
 }
 
 export interface Me {
@@ -323,6 +362,9 @@ export function createApi(token: string | undefined) {
       const qs = p.toString();
       return getJSON<AuditPage>("/audit" + (qs ? `?${qs}` : ""));
     },
+
+    /** Every service in the namespaces the caller holds service-list in. */
+    services: () => getJSON<ServiceList>("/services"),
 
     storage: () => getJSON<StorageStat>("/access/storage"),
     /** The model as a file, for keeping or for moving to another environment. */

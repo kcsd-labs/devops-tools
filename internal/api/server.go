@@ -36,6 +36,7 @@ const (
 	OpDescribe      = config.OpDescribe
 	OpMetrics       = config.OpMetrics
 	OpPodRestart    = config.OpPodRestart
+	OpServiceList   = config.OpServiceList
 	OpHelmList      = config.OpHelmList
 	OpHelmHistory   = config.OpHelmHistory
 	OpHelmRollback  = config.OpHelmRollback
@@ -167,6 +168,10 @@ func (s *Server) Router() http.Handler {
 		// The audit trail. Gated inside the handler, not by requireOp: what a
 		// caller sees depends on which namespaces they hold audit-read in.
 		r.Get("/audit", s.handleAuditLog)
+
+		// Where services answer, across the caller's namespaces. Gated inside
+		// the handler for the same reason as the trail.
+		r.Get("/services", s.handleServices)
 
 		// Where the access model lives. The state is readable by whoever may
 		// see the users list; taking a copy or putting one back is a separate

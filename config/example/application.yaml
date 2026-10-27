@@ -244,6 +244,7 @@ rbac:
             - describe
             - metrics
             - pod-restart
+            - service-list
             - helm-list
             - helm-history
             - secret-list
@@ -256,6 +257,6 @@ rbac:
       description: Read-only access, no secret values
       namespaces:
         - namespace: my-app-dev
-          operations: [logs, describe, metrics, helm-list, helm-history, secret-list]
+          operations: [logs, describe, metrics, service-list, helm-list, helm-history, secret-list]
         - namespace: my-app-staging
-          operations: [logs, describe, metrics, helm-list, helm-history, secret-list]
+          operations: [logs, describe, metrics, service-list, helm-list, helm-history, secret-list]

@@ -21,10 +21,13 @@ type RBACConfig struct {
 // the code actually checks — which is why the list a role may use is derived
 // from here rather than written out in values.
 const (
-	OpLogs          = "logs"
-	OpDescribe      = "describe"
-	OpMetrics       = "metrics"
-	OpPodRestart    = "pod-restart"
+	OpLogs       = "logs"
+	OpDescribe   = "describe"
+	OpMetrics    = "metrics"
+	OpPodRestart = "pod-restart"
+	// Where the services in a namespace answer: their addresses, ports and how
+	// many pods are ready behind them. Read only.
+	OpServiceList   = "service-list"
 	OpHelmList      = "helm-list"
 	OpHelmHistory   = "helm-history"
 	OpHelmRollback  = "helm-rollback"
@@ -72,7 +75,7 @@ const (
 // NamespaceOperations are granted per namespace.
 func NamespaceOperations() []string {
 	return []string{
-		OpLogs, OpDescribe, OpMetrics, OpPodRestart,
+		OpLogs, OpDescribe, OpMetrics, OpPodRestart, OpServiceList,
 		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
 		OpAuditRead,

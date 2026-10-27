@@ -12,6 +12,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [roles, setRoles] = useState<string[]>([]);
   const [canSeeUsers, setCanSeeUsers] = useState(false);
   const [canSeeConfigs, setCanSeeConfigs] = useState(false);
+  const [canSeeServices, setCanSeeServices] = useState(false);
   const [canSeeAudit, setCanSeeAudit] = useState(false);
   const [version, setVersion] = useState("");
   const [theme, setTheme] = useState<"dark" | "light">(
@@ -41,6 +42,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         setRoles(m.roles ?? []);
         setCanSeeUsers(m.capabilities?.users ?? false);
         setCanSeeConfigs(m.capabilities?.configurations ?? false);
+        setCanSeeServices(m.capabilities?.services ?? false);
         setCanSeeAudit(m.capabilities?.audit ?? false);
         setVersion(m.version ?? "");
       })
@@ -75,6 +77,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <span>Secrets</span>
             <span className="chev">›</span>
           </NavLink>
+          {canSeeServices && (
+            <NavLink
+              to="/services"
+              className={() =>
+                "nav-item" + (location.pathname.startsWith("/services") ? " active" : "")
+              }
+            >
+              <span>Services</span>
+              <span className="chev">›</span>
+            </NavLink>
+          )}
           {/* Only where the deployment manages configuration and the caller was
               granted a path in it: otherwise the page is an empty list, which
               reads as a fault rather than as an absence of access. */}

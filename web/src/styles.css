@@ -1781,3 +1781,177 @@ a.seg-btn {
   color: var(--warn);
   background: var(--warn-bg);
 }
+
+/* --- Services --------------------------------------------------------------
+   A table, one row per service, grouped by namespace: hundreds of services
+   have to fit on a screen. The address is the point of the page, so it is
+   the one thing in monospace, with the namespace in it quietened. */
+
+.svc-sub {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.svc-toolbar {
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.svc-partial {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.svc-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.svc-toggle b {
+  margin-left: 4px;
+  font-weight: 600;
+}
+.svc-toggle b.warn {
+  color: var(--warn);
+}
+.svc-toggle.on {
+  border-color: var(--warn);
+  color: var(--text);
+}
+.svc-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.svc-seg button {
+  background: transparent;
+  border: none;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.svc-seg button.on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.svc-table th,
+.svc-table td {
+  padding: 9px 16px;
+  vertical-align: top;
+}
+.svc-table tbody tr:not(.svc-group):hover td {
+  background: var(--card-hover);
+}
+.svc-group td {
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 16px;
+}
+.svc-group td span {
+  font-weight: 400;
+}
+.svc-name {
+  font-weight: 600;
+  line-height: 24px;
+}
+.svc-tag {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+.svc-tag.kind {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.svc-tag.ext {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.svc-addr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font-size: 13px;
+}
+.svc-addr .mono {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.svc-ns {
+  color: var(--muted);
+}
+.svc-copy {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 7px;
+  line-height: 18px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.svc-copy:hover {
+  color: var(--text);
+}
+.svc-copy.done {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.svc-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.svc-note.warn {
+  color: var(--warn);
+}
+.svc-port {
+  font-size: 12.5px;
+  line-height: 24px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.svc-port-name {
+  color: var(--muted);
+}
+.svc-pods {
+  font-size: 13px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+.svc-pods.warn {
+  color: var(--warn);
+}
+.svc-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: 1px;
+  background: var(--ok);
+}
+.svc-dot.warn {
+  background: var(--warn);
+}
+@media (max-width: 800px) {
+  .svc-table th:nth-child(3),
+  .svc-table td:nth-child(3) {
+    display: none;
+  }
+}
