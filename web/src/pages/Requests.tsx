@@ -494,7 +494,18 @@ export function Requests() {
             <>
               <div className="req-side-head sub">
                 <span>History</span>
-                <span className="req-side-src">this browser</span>
+                <span className="req-side-actions">
+                  <span className="req-side-src">this browser</span>
+                  <button
+                    className="link-btn"
+                    onClick={() => {
+                      setHistory([]);
+                      writeHistory(namespace, name, []);
+                    }}
+                  >
+                    Clear
+                  </button>
+                </span>
               </div>
               {history.map((h, i) => (
                 <div
@@ -643,6 +654,9 @@ export function Requests() {
                     </button>
                   ))}
                 </span>
+                <button className="btn ghost sm req-clear" onClick={() => setResponse(null)} title="Clear the response">
+                  Clear
+                </button>
               </div>
               {response.error && <div className="req-resp-error">{response.error}</div>}
               {response.truncated && (

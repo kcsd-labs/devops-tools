@@ -2298,3 +2298,6 @@ a.seg-btn {
   font-size: 11.5px;
   color: var(--muted);
 }
+.req-clear {
+  margin-left: 4px;
+}
