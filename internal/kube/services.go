@@ -44,19 +44,10 @@ type Service struct {
 	// Pods names the pods behind the service, ready or not, up to podsListed.
 	Pods []string `json:"pods,omitempty"`
 
-	// Workloads are the Deployments, StatefulSets and DaemonSets whose pods
-	// the selector matches: what to look at when the service misbehaves.
-	Workloads []Workload `json:"workloads,omitempty"`
 	// Release and Chart name the Helm release that created the service, from
 	// the annotation and label Helm puts on everything it installs.
 	Release string `json:"release,omitempty"`
 	Chart   string `json:"chart,omitempty"`
-}
-
-// Workload is a controller whose pods a service selects.
-type Workload struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
 }
 
 // ServicePort is one port a service answers on.
@@ -121,10 +112,8 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 			Release:      s.Annotations["meta.helm.sh/release-name"],
 			Chart:        s.Labels["helm.sh/chart"],
 		}
+		// The pods' own declared ports, to check the target port against.
 		selected := selectedBy(s.Spec.Selector, workloads)
-		for _, w := range selected {
-			svc.Workloads = append(svc.Workloads, Workload{Kind: w.kind, Name: w.name})
-		}
 		if svc.Type == "" {
 			svc.Type = string(corev1.ServiceTypeClusterIP)
 		}
@@ -228,7 +217,7 @@ type workload struct {
 }
 
 // workloadsIn lists the controllers in a namespace. A kind that cannot be read
-// is skipped: the owners are a convenience on the page, not its point.
+// is skipped: the port check is a convenience on the page, not its point.
 func workloadsIn(ctx context.Context, cs kubernetes.Interface, namespace string) []workload {
 	var out []workload
 	add := func(kind, name string, tpl corev1.PodTemplateSpec) {

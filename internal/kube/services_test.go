@@ -202,18 +202,11 @@ func deployment(name string, podLabels map[string]string, ports ...corev1.Contai
 	}
 }
 
-func TestTheWorkloadAndReleaseBehindAServiceAreNamed(t *testing.T) {
-	got := byName(t,
-		service("api", func(s *corev1.Service) {
-			s.Annotations = map[string]string{"meta.helm.sh/release-name": "payments"}
-			s.Labels = map[string]string{"helm.sh/chart": "payments-2.1.0"}
-		}),
-		deployment("api", map[string]string{"app": "api", "version": "v2"}),
-		deployment("worker", map[string]string{"app": "worker"}),
-	)["api"]
-	if want := []Workload{{Kind: "Deployment", Name: "api"}}; !reflect.DeepEqual(got.Workloads, want) {
-		t.Errorf("workloads = %+v, want %+v", got.Workloads, want)
-	}
+func TestTheReleaseBehindAServiceIsNamed(t *testing.T) {
+	got := byName(t, service("api", func(s *corev1.Service) {
+		s.Annotations = map[string]string{"meta.helm.sh/release-name": "payments"}
+		s.Labels = map[string]string{"helm.sh/chart": "payments-2.1.0"}
+	}))["api"]
 	if got.Release != "payments" || got.Chart != "payments-2.1.0" {
 		t.Errorf("release, chart = %q, %q", got.Release, got.Chart)
 	}

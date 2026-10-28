@@ -209,8 +209,6 @@ export interface ServiceInfo {
   endpoints?: { ready: number; total: number };
   /** The pods behind it, ready or not, at most twenty. */
   pods?: string[];
-  /** The controllers whose pods the selector matches. */
-  workloads?: { kind: string; name: string }[];
   /** The Helm release that installed it, and its chart label. */
   release?: string;
   chart?: string;

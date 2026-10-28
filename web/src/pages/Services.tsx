@@ -66,11 +66,6 @@ function problem(s: ServiceInfo): boolean {
   return notReady(s) || s.ports.some((p) => p.declared);
 }
 
-const KIND_SHORT: Record<string, string> = {
-  Deployment: "deploy",
-  StatefulSet: "sts",
-  DaemonSet: "ds",
-};
 
 /** What a row needs said under its address, if anything. */
 function note(s: ServiceInfo): { text: string; warn: boolean; pods: boolean } | null {
@@ -335,24 +330,15 @@ export function Services() {
                       {(s.type === "NodePort" || s.type === "LoadBalancer") && (
                         <span className="svc-tag kind">{s.type}</span>
                       )}
-                      {((s.workloads?.length ?? 0) > 0 || s.release) && (
-                        <div className="svc-owner">
-                          {(s.workloads ?? []).map((w) => (
-                            <span key={w.kind + "/" + w.name}>
-                              {KIND_SHORT[w.kind] ?? w.kind} <b>{w.name}</b>
-                            </span>
-                          ))}
-                          {s.release && (
-                            <span title={s.chart}>
-                              helm{" "}
-                              {data.mayHelm ? (
-                                <Link className="link" to={`/ns/${s.namespace}/helm`}>
-                                  {s.release}
-                                </Link>
-                              ) : (
-                                <b>{s.release}</b>
-                              )}
-                            </span>
+                      {s.release && (
+                        <div className="svc-owner" title={s.chart}>
+                          helm{" "}
+                          {data.mayHelm ? (
+                            <Link className="link" to={`/ns/${s.namespace}/helm`}>
+                              {s.release}
+                            </Link>
+                          ) : (
+                            <b>{s.release}</b>
                           )}
                         </div>
                       )}
