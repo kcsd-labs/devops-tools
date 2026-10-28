@@ -1980,21 +1980,51 @@ a.seg-btn {
   margin-top: 4px;
   font-size: 12.5px;
 }
+/* The page fills the working area exactly and does not scroll itself: the
+   list on the left and the request on the right scroll each on their own.
+   A list sized from the window instead ran past the bottom, by however tall
+   the heading above it happened to be. */
+.content:has(> .req-page) {
+  padding-bottom: 0;
+}
+.req-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.req-page > .page-head {
+  flex: 0 0 auto;
+}
 .req-layout {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
-  align-items: start;
+  padding-bottom: 20px;
+}
+/* .card.no-pad clips its content, and outranks a single class: without the
+   card in the selector the list cannot be scrolled with the wheel at all. */
+.card.req-side {
+  padding: 6px 0 10px;
+  overflow: auto;
+}
+.req-main {
+  overflow: auto;
 }
 @media (max-width: 900px) {
+  .req-page {
+    height: auto;
+    display: block;
+  }
   .req-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
   }
-}
-.req-side {
-  padding: 6px 0 10px;
-  max-height: calc(100vh - 190px);
-  overflow: auto;
+  .card.req-side {
+    max-height: 50vh;
+  }
 }
 .req-side-head {
   display: flex;
@@ -2121,6 +2151,7 @@ a.seg-btn {
 }
 .req-main {
   min-width: 0;
+  min-height: 0;
 }
 .req-meta {
   display: flex;

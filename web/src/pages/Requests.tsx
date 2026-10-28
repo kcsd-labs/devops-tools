@@ -338,7 +338,7 @@ export function Requests() {
     update({ headers: headers.map((h, j) => (j === i ? { ...h, ...patch } : h)) });
 
   return (
-    <div className="page">
+    <div className="page req-page">
       {dialogs}
       <div className="page-head">
         <div>
