@@ -3,6 +3,27 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.26.0
+
+- INFR-1931 — a Services page: where each service in a namespace answers
+  (`name.namespace:port`, or the full name), the port its pods listen on, how
+  many of them are ready, and a warning when the target port is not one the
+  pods declare. From a service, requests are sent as in Postman and kept in a
+  collection beside it — a ConfigMap in its namespace — exported and imported
+  in Postman's format to move between environments. Operations the service
+  describes in its OpenAPI document are offered as ready requests. A token is
+  written as `{{secret:name/key}}` and filled in on the server, only for
+  someone who may read that secret.
+- INFR-1935 — the audit trail says what an edit changed: which keys of a
+  secret, which settings of a configuration file, with a link to the commit.
+  Names only, never values.
+- New permissions, granted per namespace: `service-list`, `service-request`
+  (GET, HEAD, OPTIONS) and `service-request-write` (methods that change
+  something, and saving requests). Roles granted `"*"` have them already;
+  others need them added under Roles.
+- With `rbac.fullAccess: false` the chart also grants reading EndpointSlices,
+  for the count of ready pods.
+
 ## 0.25.9
 
 - INFR-1802 — LDAP authentication: people sign in with the account they already
