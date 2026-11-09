@@ -20,7 +20,7 @@ RUN npm run build
 # 1.26.8 because 1.26.9 came out a week later, and nothing said so. Pinned, the
 # weekly scan reads the same standard library this image contains, and turns
 # red when a newer patch fixes something in it — which is the cue to bump both.
-FROM golang:1.26.9 AS build
+FROM golang:1.26.10 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
