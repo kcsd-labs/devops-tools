@@ -335,10 +335,10 @@ config:
 
   cluster:
     inCluster: true
-    # A role granted "*" is shown the cluster's namespaces rather than a list
-    # written out here. These are left out of that list — hidden only, not
-    # forbidden: opening one by name still works. Entries are exact names or a
-    # prefix ending in `*`. Set to [] to show everything.
+    # The cluster's own namespaces. A role granted "*" does not reach them:
+    # they are left out of its list and closed to it when typed by name. A
+    # role that needs one is granted it by name. Entries are exact names or a
+    # prefix ending in `*`. Set to [] to let "*" reach everything.
     hiddenNamespaces: ["kube-*", "default"]
 
   impersonation:

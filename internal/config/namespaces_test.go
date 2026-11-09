@@ -1,8 +1,8 @@
-package kube
+package config
 
 import "testing"
 
-func TestMatchesAny(t *testing.T) {
+func TestMatchesNamespace(t *testing.T) {
 	patterns := []string{"kube-*", "default"}
 	tests := []struct {
 		name   string
@@ -20,8 +20,8 @@ func TestMatchesAny(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := matchesAny(tc.name, patterns); got != tc.hidden {
-				t.Fatalf("matchesAny(%q) = %v, want %v", tc.name, got, tc.hidden)
+			if got := MatchesNamespace(tc.name, patterns); got != tc.hidden {
+				t.Fatalf("MatchesNamespace(%q) = %v, want %v", tc.name, got, tc.hidden)
 			}
 		})
 	}
@@ -29,11 +29,11 @@ func TestMatchesAny(t *testing.T) {
 
 // An empty configuration hides nothing — that is how an operator asks to see
 // every namespace, including the cluster's own.
-func TestMatchesAnyEmpty(t *testing.T) {
-	if matchesAny("kube-system", nil) {
+func TestMatchesNamespaceEmpty(t *testing.T) {
+	if MatchesNamespace("kube-system", nil) {
 		t.Fatal("no patterns should hide nothing")
 	}
-	if matchesAny("kube-system", []string{}) {
+	if MatchesNamespace("kube-system", []string{}) {
 		t.Fatal("an empty pattern list should hide nothing")
 	}
 }

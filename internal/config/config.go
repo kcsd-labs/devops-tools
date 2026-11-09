@@ -396,16 +396,34 @@ type ClusterConfig struct {
 	InCluster bool `yaml:"inCluster"`
 	// Kubeconfig is used when InCluster is false (local development).
 	Kubeconfig string `yaml:"kubeconfig"`
-	// HiddenNamespaces are kept out of the list a role granted "*" is shown.
-	// They are only hidden, not forbidden: a wildcard role still carries the
-	// permission, and opening one by name works. Entries are exact names or a
-	// prefix ending in `*`. Unset means DefaultHiddenNamespaces.
+	// HiddenNamespaces are out of reach of a role granted "*": left out of its
+	// list, and closed to it when opened by name. A role that needs one is
+	// granted it by name, like any other namespace. Entries are exact names or
+	// a prefix ending in `*`. Unset means DefaultHiddenNamespaces.
 	HiddenNamespaces []string `yaml:"hiddenNamespaces"`
 }
 
 // DefaultHiddenNamespaces keeps the cluster's own plumbing out of a portal
 // aimed at application teams. Set cluster.hiddenNamespaces to [] to see it.
 var DefaultHiddenNamespaces = []string{"kube-*", "default"}
+
+// MatchesNamespace reports whether name matches one of the patterns. A pattern
+// is an exact name, or a prefix ending in `*` — enough for "kube-*" without
+// pulling in a glob dependency for something nobody writes complex patterns in.
+func MatchesNamespace(name string, patterns []string) bool {
+	for _, p := range patterns {
+		if prefix, ok := strings.CutSuffix(p, "*"); ok {
+			if strings.HasPrefix(name, prefix) {
+				return true
+			}
+			continue
+		}
+		if name == p {
+			return true
+		}
+	}
+	return false
+}
 
 // ImpersonationConfig makes the API server see the end user rather than the
 // application's ServiceAccount, so Kubernetes RBAC applies as a second gate.

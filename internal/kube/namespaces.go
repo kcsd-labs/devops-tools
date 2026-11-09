@@ -3,10 +3,11 @@ package kube
 import (
 	"context"
 	"sort"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"devops-tools/internal/config"
 )
 
 // ListNamespaces returns the namespaces of the cluster, minus the ones hidden
@@ -33,29 +34,11 @@ func (m *Manager) ListNamespaces(ctx context.Context, asUser string, hidden []st
 		if ns.Status.Phase == corev1.NamespaceTerminating {
 			continue
 		}
-		if matchesAny(ns.Name, hidden) {
+		if config.MatchesNamespace(ns.Name, hidden) {
 			continue
 		}
 		out = append(out, ns.Name)
 	}
 	sort.Strings(out)
 	return out, nil
-}
-
-// matchesAny reports whether name matches one of the patterns. A pattern is an
-// exact name, or a prefix ending in `*` — enough for "kube-*" without pulling
-// in a glob dependency for something nobody writes complex patterns in.
-func matchesAny(name string, patterns []string) bool {
-	for _, p := range patterns {
-		if strings.HasSuffix(p, "*") {
-			if strings.HasPrefix(name, strings.TrimSuffix(p, "*")) {
-				return true
-			}
-			continue
-		}
-		if name == p {
-			return true
-		}
-	}
-	return false
 }

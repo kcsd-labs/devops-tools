@@ -170,6 +170,7 @@ func main() {
 		}
 	}
 	authorizer := rbac.New(userStore.AccessModel(rbacCfg.Operations))
+	authorizer.ReserveFromWildcard(cfg.Cluster.HiddenNamespaces)
 
 	// With more than one replica the model changes without this one being
 	// asked. Following it is what makes a role revoked on another replica take

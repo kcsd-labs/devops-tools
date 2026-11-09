@@ -173,11 +173,11 @@ cluster:
   inCluster: true
   # Used only when inCluster is false (local development).
   kubeconfig: ""
-  # A role granted "*" names no namespaces, so the list it is shown comes from
-  # the cluster itself. These are kept out of it. They are hidden, not
-  # forbidden: such a role can still open one by typing its name. Entries are
-  # exact names or a prefix ending in `*`.
-  # Omit the key for the default below; set it to [] to show everything.
+  # The cluster's own namespaces. A role granted "*" does not reach them: they
+  # are left out of its list and closed to it when typed by name. A role that
+  # needs one is granted it by name. Entries are exact names or a prefix ending
+  # in `*`.
+  # Omit the key for the default below; set it to [] to let "*" reach everything.
   hiddenNamespaces: ["kube-*", "default"]
 
 # Impersonation makes the API server see the end user instead of this service's

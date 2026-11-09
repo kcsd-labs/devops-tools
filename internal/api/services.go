@@ -26,7 +26,7 @@ func (s *Server) handleServiceNamespaces(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "could not list the namespaces: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		namespaces = all
+		namespaces = unionSorted(all, s.authz.NamedNamespaces(user.Roles, OpServiceList))
 	}
 	if len(namespaces) == 0 {
 		http.Error(w, "forbidden", http.StatusForbidden)

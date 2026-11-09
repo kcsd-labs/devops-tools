@@ -16,12 +16,23 @@ import (
 // which is what makes hot reload safe.
 type Authorizer struct {
 	cfg atomic.Pointer[config.RBACConfig]
+	// reserved are the namespaces a "*" grant does not reach — the cluster's
+	// own, from cluster.hiddenNamespaces. Set once, before serving.
+	reserved []string
 }
 
 func New(cfg *config.RBACConfig) *Authorizer {
 	a := &Authorizer{}
 	a.cfg.Store(cfg)
 	return a
+}
+
+// ReserveFromWildcard keeps "*" grants out of the namespaces matching these
+// patterns. Nothing is done in one of those except through a grant that names
+// it: a slip in kube-system takes the whole cluster with it, and that should
+// be a decision somebody wrote down, not a side effect of "everything".
+func (a *Authorizer) ReserveFromWildcard(patterns []string) {
+	a.reserved = patterns
 }
 
 // Replace swaps in a new model atomically; called by the configuration watcher.
@@ -39,6 +50,9 @@ func (a *Authorizer) Allowed(roles []string, namespace, op string) bool {
 		}
 		for _, grant := range spec.Namespaces {
 			if grant.Namespace != "*" && grant.Namespace != namespace {
+				continue
+			}
+			if grant.Namespace == "*" && config.MatchesNamespace(namespace, a.reserved) {
 				continue
 			}
 			if hasOp(grant.Operations, op) {
@@ -139,6 +153,27 @@ func (a *Authorizer) NamespacesForOp(roles []string, op string) []string {
 				return []string{"*"}
 			}
 			set[grant.Namespace] = true
+		}
+	}
+	return sortedKeys(set)
+}
+
+// NamedNamespaces lists the namespaces these roles grant by name, for op or,
+// with op empty, for anything. A role holding "*" sees the cluster's list,
+// which leaves out the reserved namespaces; a grant naming one of them is what
+// puts it back.
+func (a *Authorizer) NamedNamespaces(roles []string, op string) []string {
+	cfg := a.cfg.Load()
+	set := map[string]bool{}
+	for _, role := range roles {
+		spec, ok := cfg.Roles[role]
+		if !ok {
+			continue
+		}
+		for _, grant := range spec.Namespaces {
+			if grant.Namespace != "*" && (op == "" || hasOp(grant.Operations, op)) {
+				set[grant.Namespace] = true
+			}
 		}
 	}
 	return sortedKeys(set)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"devops-tools/internal/audit"
@@ -140,8 +141,26 @@ func (s *Server) handleNamespaces(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, namespaceList{Namespaces: []string{}, Wildcard: true})
 			return
 		}
+		all = unionSorted(all, s.authz.NamedNamespaces(user.Roles, ""))
 		writeJSON(w, http.StatusOK, namespaceList{Namespaces: all, Wildcard: true})
 		return
 	}
 	writeJSON(w, http.StatusOK, namespaceList{Namespaces: visible, Wildcard: false})
+}
+
+// unionSorted merges two lists of names into one, sorted, each name once. It
+// puts a hidden namespace a role names back into the list "*" was shown.
+func unionSorted(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, n := range list {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
