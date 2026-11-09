@@ -45,6 +45,13 @@ const (
 	OpSecretUpdate        = "secret-update"
 	OpSecretDelete        = "secret-delete"
 
+	// ConfigMaps. Seeing one shows its values: unlike a secret's, they are not
+	// a secret, so there is no separate read.
+	OpConfigMapList   = "configmap-list"
+	OpConfigMapCreate = "configmap-create"
+	OpConfigMapUpdate = "configmap-update"
+	OpConfigMapDelete = "configmap-delete"
+
 	// Granted per namespace to see what happened there — everyone's actions,
 	// not only the holder's — and globally for the entries that belong to no
 	// namespace: sign-ins, and who was granted what.
@@ -86,6 +93,7 @@ func NamespaceOperations() []string {
 		OpServiceList, OpServiceRequest, OpServiceRequestWrite,
 		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
+		OpConfigMapList, OpConfigMapCreate, OpConfigMapUpdate, OpConfigMapDelete,
 		OpAuditRead,
 		OpImageRebuild, OpPipelineDeploy,
 	}

@@ -48,6 +48,10 @@ const (
 	OpSecretCreate        = config.OpSecretCreate
 	OpSecretUpdate        = config.OpSecretUpdate
 	OpSecretDelete        = config.OpSecretDelete
+	OpConfigMapList       = config.OpConfigMapList
+	OpConfigMapCreate     = config.OpConfigMapCreate
+	OpConfigMapUpdate     = config.OpConfigMapUpdate
+	OpConfigMapDelete     = config.OpConfigMapDelete
 
 	OpAccessRestore = config.OpAccessRestore
 
@@ -262,6 +266,17 @@ func (s *Server) Router() http.Handler {
 		r.Post(base+"/secrets", s.requireOp(OpSecretCreate, s.handleCreateSecret))
 		r.Put(base+"/secrets/{name}", s.requireOp(OpSecretUpdate, s.handleUpdateSecret))
 		r.Delete(base+"/secrets/{name}", s.requireOp(OpSecretDelete, s.handleDeleteSecret))
+
+		// configmaps
+		r.Get(base+"/configmaps", s.requireOp(OpConfigMapList, s.handleListConfigMaps))
+		r.Get(base+"/configmaps/{name}", s.requireOp(OpConfigMapList, s.handleGetConfigMap))
+		r.Get(base+"/configmaps/{name}/export", s.requireOp(OpConfigMapList, s.handleExportConfigMap))
+		r.Post(base+"/configmaps", s.requireOp(OpConfigMapCreate, s.handleCreateConfigMap))
+		r.Put(base+"/configmaps/{name}", s.requireOp(OpConfigMapUpdate, s.handleUpdateConfigMap))
+		r.Delete(base+"/configmaps/{name}", s.requireOp(OpConfigMapDelete, s.handleDeleteConfigMap))
+		// Rolling a workload out after what it reads has changed. The same act
+		// as restarting one of its pods, and the same permission.
+		r.Post(base+"/workloads/{kind}/{name}/restart", s.requireOp(OpPodRestart, s.handleRestartWorkload))
 	})
 
 	// Everything else is the single-page application, embedded in the binary.

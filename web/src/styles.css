@@ -2301,3 +2301,297 @@ a.seg-btn {
 .req-clear {
   margin-left: 4px;
 }
+
+/* --- Secrets & ConfigMaps ----------------------------------------------------
+   One entry in the menu, two views: a switch under the title moves between
+   them and keeps the namespace. */
+
+.seg-switch {
+  display: inline-flex;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.seg-switch > * {
+  padding: 6px 14px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.seg-switch > a:hover {
+  color: var(--text);
+}
+.seg-switch > .on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* A page that fills the working area and scrolls inside its panes, as the
+   requests screen does. */
+.content:has(> .fill-page) {
+  padding-bottom: 0;
+}
+.fill-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.fill-page > .page-head {
+  flex: 0 0 auto;
+}
+.cm-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  padding-bottom: 20px;
+}
+.card.cm-list {
+  overflow: auto;
+}
+.cm-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  padding: 10px 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.cm-item:hover {
+  background: var(--card-hover);
+}
+.cm-item.on {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.cm-item-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cm-item-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.cm-item-meta b {
+  font-weight: 500;
+  color: var(--text);
+}
+.cm-pill {
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 6px;
+  margin-left: 6px;
+  background: var(--border);
+  color: var(--muted);
+}
+.warn-soft {
+  color: var(--warn);
+}
+.cm-empty {
+  display: grid;
+  place-items: center;
+}
+.card.cm-editor {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.cm-head {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cm-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.cm-used {
+  font-size: 12.5px;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+.cm-used b {
+  font-weight: 500;
+}
+.cm-warn {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 7px 11px;
+}
+.cm-tabs {
+  margin: 0;
+  padding: 0 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.cm-tabs .tab.mono {
+  font-size: 12.5px;
+}
+.cm-dot {
+  color: var(--warn);
+}
+.cm-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 4px;
+  font-size: 15px;
+}
+.cm-x:hover {
+  color: var(--err);
+}
+.cm-binary {
+  color: var(--muted);
+  cursor: default;
+}
+.cm-add {
+  margin-left: auto;
+  padding: 0 8px;
+}
+.cm-add-input {
+  margin-left: auto;
+  width: 240px;
+  flex: none;
+}
+.cm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.cm-body > div:first-child:not(.cm-vars) {
+  height: 100%;
+}
+.cm-vars {
+  padding: 12px 16px;
+}
+.cm-var-head,
+.cm-var {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 28px;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cm-var-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.cm-var .cm-x {
+  visibility: hidden;
+}
+.cm-var:hover .cm-x {
+  visibility: visible;
+}
+.cm-changed {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
+.cm-saved {
+  border-top: 1px solid var(--border);
+  background: var(--ok-bg);
+  color: var(--ok);
+  padding: 10px 16px;
+  font-size: 12.5px;
+}
+.cm-apply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--text);
+}
+.cm-apply .btn {
+  margin-left: auto;
+}
+.cm-done {
+  margin-left: auto;
+  color: var(--muted);
+}
+.cm-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.cm-import {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+}
+@media (max-width: 900px) {
+  .fill-page {
+    height: auto;
+    display: block;
+  }
+  .cm-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+  .card.cm-list {
+    max-height: 40vh;
+  }
+  .cm-body {
+    min-height: 50vh;
+  }
+}
+.seg-switch > button {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
+.seg-switch > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.cm-view {
+  margin: 0 4px 0 0;
+  font-size: 12.5px;
+}
+.cm-view > * {
+  padding: 4px 11px;
+}
+.cm-sep {
+  color: var(--muted);
+  font-weight: 400;
+  margin: 0 8px;
+}
+.cm-key {
+  color: var(--accent);
+}
+.cm-keys-caption {
+  padding: 10px 16px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.cm-inline-value {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.cm-where {
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}

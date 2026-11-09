@@ -24,6 +24,9 @@ const LOCAL_SIGNIN_PATH = "/signin/local";
 // Loaded on demand. It brings the code editor with it, which is the largest
 // thing in the bundle by some way, and most installations have configuration
 // management switched off entirely — they should not pay for it on every load.
+// Brings the same editor, and is loaded on demand for the same reason.
+const ConfigMaps = lazy(() => import("./pages/ConfigMaps").then((m) => ({ default: m.ConfigMaps })));
+
 const Configurations = lazy(() =>
   import("./pages/Configurations").then((m) => ({ default: m.Configurations }))
 );
@@ -51,6 +54,14 @@ export default function App() {
         <Route path="/ns/:namespace/logs" element={<MultiLogs />} />
         <Route path="/ns/:namespace/helm" element={<Helm />} />
         <Route path="/secrets" element={<Secrets />} />
+        <Route
+          path="/configmaps"
+          element={
+            <Suspense fallback={<div className="page muted">Loading…</div>}>
+              <ConfigMaps />
+            </Suspense>
+          }
+        />
         <Route path="/services" element={<Services />} />
         <Route path="/ns/:namespace/services/:name" element={<Requests />} />
         <Route

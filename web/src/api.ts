@@ -305,6 +305,51 @@ export interface SecretSummary {
   keys: string[];
 }
 
+/** A ConfigMap as the list shows it. */
+export interface ConfigMapSummary {
+  name: string;
+  keys: number;
+  /** The Helm release that installed it: its next deploy undoes edits. */
+  release?: string;
+  immutable?: boolean;
+  /** CA bundles and the portal's own: hidden unless asked for. */
+  system?: boolean;
+  /** Workloads that read it; absent when they could not be read. */
+  usedBy?: number;
+}
+
+export interface ConfigMapList {
+  configMaps: ConfigMapSummary[];
+  mayCreate: boolean;
+  mayUpdate: boolean;
+  mayDelete: boolean;
+  mayRestart: boolean;
+}
+
+/** How one workload reads a ConfigMap. Env values are fixed at start; mounted
+    files refresh within a minute, except under subPath. */
+export interface ConfigMapUsage {
+  kind: string;
+  name: string;
+  envAll?: boolean;
+  env?: string[];
+  mounts?: { path: string; keys?: string[]; subPath?: boolean }[];
+}
+
+export interface ConfigMapData {
+  name: string;
+  data: Record<string, string>;
+  /** The data: block as kubectl shows it. */
+  yaml: string;
+  binaryKeys?: string[];
+  release?: string;
+  immutable?: boolean;
+  /** Sent back with a change, so concurrent edits do not overwrite. */
+  version: string;
+  usedBy: ConfigMapUsage[];
+  usageUnknown?: boolean;
+}
+
 export interface SecretData {
   name: string;
   type: string;
@@ -650,6 +695,37 @@ export function createApi(token: string | undefined) {
     updateSecret: (ns: string, name: string, data: Record<string, string>) =>
       sendJSON("PUT", `/namespaces/${ns}/secrets/${name}`, { data }),
     deleteSecret: (ns: string, name: string) => del(`/namespaces/${ns}/secrets/${name}`),
+
+    configMaps: (ns: string) => getJSON<ConfigMapList>(`/namespaces/${ns}/configmaps`),
+    configMap: (ns: string, name: string) =>
+      getJSON<ConfigMapData>(`/namespaces/${ns}/configmaps/${encodeURIComponent(name)}`),
+    /** Creates from a name and values, or from a manifest (the import). */
+    createConfigMap: (
+      ns: string,
+      body: { name: string; data?: Record<string, string>; yaml?: string } | { manifest: string }
+    ) => sendJSONFor<{ name: string }>("POST", `/namespaces/${ns}/configmaps`, body),
+    /** Saves either the values, or the data: block as YAML text. */
+    updateConfigMap: (
+      ns: string,
+      name: string,
+      version: string,
+      change: { data: Record<string, string> } | { yaml: string }
+    ) =>
+      sendJSONFor<{ configMap: ConfigMapData; detail: string }>(
+        "PUT",
+        `/namespaces/${ns}/configmaps/${encodeURIComponent(name)}`,
+        { version, ...change }
+      ),
+    deleteConfigMap: (ns: string, name: string) =>
+      del(`/namespaces/${ns}/configmaps/${encodeURIComponent(name)}`),
+    /** The ConfigMap as a manifest, for another environment. */
+    exportConfigMap: (ns: string, name: string) =>
+      getText(`/namespaces/${ns}/configmaps/${encodeURIComponent(name)}/export`),
+    /** Rolls a workload out, as kubectl rollout restart does. */
+    restartWorkload: (ns: string, kind: string, name: string) =>
+      postJSON<{ status: string }>(
+        `/namespaces/${ns}/workloads/${kind}/${encodeURIComponent(name)}/restart`
+      ),
   };
 }
 

@@ -438,6 +438,17 @@ func (m *Manager) RolloutRestart(ctx context.Context, asUser, namespace, pod str
 	if !ok {
 		return WorkloadRef{}, ErrNoController
 	}
+	return m.RestartWorkload(ctx, asUser, namespace, wl)
+}
+
+// RestartWorkload is RolloutRestart for a workload named directly rather than
+// reached through one of its pods — after a ConfigMap it reads has changed.
+func (m *Manager) RestartWorkload(ctx context.Context, asUser, namespace string, wl WorkloadRef) (WorkloadRef, error) {
+	switch wl.Kind {
+	case "Deployment", "StatefulSet", "DaemonSet":
+	default:
+		return WorkloadRef{}, ErrNoController
+	}
 	cs, err := m.Clientset(asUser)
 	if err != nil {
 		return WorkloadRef{}, err

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
+import { useEditorTheme } from "../editorTheme";
 import { useApi } from "../useApi";
 import { useDialogs } from "../components/Dialogs";
 import { SideBySide } from "../components/SideBySide";
@@ -682,20 +683,4 @@ function TreeNodes({
       })}
     </ul>
   );
-}
-
-// --- theme -----------------------------------------------------------------
-
-// The editor has to follow the portal's theme, which lives on the root element
-// and is toggled from the top bar. Watching the attribute is what keeps the two
-// in step without threading the theme through every page.
-function useEditorTheme(): "light" | "dark" {
-  const read = () => (document.documentElement.dataset.theme === "light" ? "light" : "dark");
-  const [theme, setTheme] = useState<"light" | "dark">(read);
-  useEffect(() => {
-    const obs = new MutationObserver(() => setTheme(read()));
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => obs.disconnect();
-  }, []);
-  return theme;
 }

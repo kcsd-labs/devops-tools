@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useApi } from "../useApi";
 import { useScrollLock } from "../useScrollLock";
 import type { SecretSummary, SecretData } from "../api";
@@ -20,7 +21,10 @@ export function Secrets() {
   // opened. Only reachable by a wildcard role, which is the only one that has
   // access to anything beyond the list in the first place.
   const [typing, setTyping] = useState(false);
-  const [ns, setNs] = useState("");
+  // A namespace in the address wins: it is how the ConfigMaps tab hands over
+  // the one it was showing.
+  const [params] = useSearchParams();
+  const [ns, setNs] = useState(() => params.get("namespace") ?? "");
 
   const [secrets, setSecrets] = useState<SecretSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -310,8 +314,11 @@ export function Secrets() {
       {dialogs}
       <div className="page-head">
         <div>
-          <div className="crumb">Secrets</div>
           <h1 className="page-title">Secrets</h1>
+          <div className="seg-switch" role="tablist">
+            <span className="on">Secrets</span>
+            <Link to={`/configmaps${ns ? "?namespace=" + encodeURIComponent(ns) : ""}`}>ConfigMaps</Link>
+          </div>
         </div>
         <div className="row">
           {typing || (wildcard && namespaces.length === 0) ? (

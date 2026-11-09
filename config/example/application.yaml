@@ -253,12 +253,15 @@ rbac:
             - secret-read
             - secret-create
             - secret-update
+            - configmap-list
+            - configmap-create
+            - configmap-update
   
     # Read-only: useful for support, QA or anyone who should look but not touch.
     viewer:
       description: Read-only access, no secret values
       namespaces:
         - namespace: my-app-dev
-          operations: [logs, describe, metrics, service-list, service-request, helm-list, helm-history, secret-list]
+          operations: [logs, describe, metrics, service-list, service-request, helm-list, helm-history, secret-list, configmap-list]
         - namespace: my-app-staging
-          operations: [logs, describe, metrics, service-list, service-request, helm-list, helm-history, secret-list]
+          operations: [logs, describe, metrics, service-list, service-request, helm-list, helm-history, secret-list, configmap-list]

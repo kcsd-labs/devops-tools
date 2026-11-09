@@ -70,11 +70,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <span>Namespaces</span>
             <span className="chev">›</span>
           </NavLink>
+          {/* One place for what an application reads from its namespace. Not
+              a separate "ConfigMaps" entry: beside "Configurations" the two
+              words read as the same thing. */}
           <NavLink
             to="/secrets"
-            className={() => "nav-item" + (location.pathname.startsWith("/secrets") ? " active" : "")}
+            className={() =>
+              "nav-item" +
+              (location.pathname.startsWith("/secrets") || location.pathname.startsWith("/configmaps")
+                ? " active"
+                : "")
+            }
           >
-            <span>Secrets</span>
+            <span>Secrets &amp; ConfigMaps</span>
             <span className="chev">›</span>
           </NavLink>
           {canSeeServices && (
