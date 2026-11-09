@@ -408,15 +408,23 @@ export function Secrets() {
                 <td className="muted">{sec.keys.join(", ")}</td>
                 <td className="right">
                   <span className="action-cell">
-                    <button className="btn ghost sm" onClick={() => openExport(sec.name)}>
-                      Transfer
-                    </button>
-                    <button className="btn ghost sm" onClick={() => openEdit(sec.name)}>
-                      Edit
-                    </button>
-                    <button className="btn danger sm" onClick={() => remove(sec.name)}>
-                      Delete
-                    </button>
+                    {sec.system ? (
+                      <span className="muted" title="Kept by Helm or by Kubernetes — not changed by hand">
+                        system
+                      </span>
+                    ) : (
+                      <>
+                        <button className="btn ghost sm" onClick={() => openExport(sec.name)}>
+                          Transfer
+                        </button>
+                        <button className="btn ghost sm" onClick={() => openEdit(sec.name)}>
+                          Edit
+                        </button>
+                        <button className="btn danger sm" onClick={() => remove(sec.name)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </span>
                 </td>
               </tr>
@@ -586,16 +594,18 @@ export function Secrets() {
                 <button className="btn ghost" onClick={() => setViewing(null)}>
                   Close
                 </button>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    const n = viewing.name;
-                    setViewing(null);
-                    openEdit(n);
-                  }}
-                >
-                  Edit
-                </button>
+                {!viewing.system && (
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      const n = viewing.name;
+                      setViewing(null);
+                      openEdit(n);
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
               </div>
             </div>
           </div>

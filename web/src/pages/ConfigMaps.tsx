@@ -232,7 +232,7 @@ export function ConfigMaps() {
   const draft = useMemo(() => join(files, vars), [files, vars]);
   const changed = useMemo(() => (cm ? changedKeys(cm.data, draft) : []), [cm, draft]);
   const dirty = view === "yaml" ? !!cm && yamlText !== cm.yaml : changed.length > 0;
-  const readOnly = !list?.mayUpdate || !!cm?.immutable;
+  const readOnly = !list?.mayUpdate || !!cm?.immutable || !!cm?.system;
 
   const leave = async () =>
     !dirty || (await confirm({ message: "Discard the changes to " + cm?.name + "?", okText: "Discard" }));
@@ -446,6 +446,7 @@ export function ConfigMaps() {
               <div className="cm-item-name mono">
                 {c.name}
                 {c.immutable && <span className="cm-pill">immutable</span>}
+                {c.system && <span className="cm-pill">system</span>}
               </div>
               <div className="cm-item-meta">
                 {c.keys} {c.keys === 1 ? "key" : "keys"}
@@ -505,10 +506,12 @@ export function ConfigMaps() {
                     </button>
                   ))}
                 </div>
-                <button className="btn ghost sm" onClick={exportYaml} title="Download as a manifest">
-                  Export
-                </button>
-                {list?.mayDelete && (
+                {!cm.system && (
+                  <button className="btn ghost sm" onClick={exportYaml} title="Download as a manifest">
+                    Export
+                  </button>
+                )}
+                {list?.mayDelete && !cm.system && (
                   <button className="btn danger sm" onClick={remove}>
                     Delete
                   </button>
@@ -534,6 +537,11 @@ export function ConfigMaps() {
                 <div className="cm-warn">
                   ⚠ Installed by Helm release <b>{cm.release}</b>. A change here is undone by its next deploy —
                   change the chart's values to keep it.
+                </div>
+              )}
+              {cm.system && (
+                <div className="cm-warn">
+                  Kept by Kubernetes or by the portal itself — shown here, not changed by hand.
                 </div>
               )}
               {cm.immutable && (

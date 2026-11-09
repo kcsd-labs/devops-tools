@@ -117,6 +117,31 @@ func TestAStaleOrImmutableConfigMapIsNotOverwritten(t *testing.T) {
 	}
 }
 
+// What the cluster or the portal keeps is not changed by hand, whoever asks.
+func TestSystemConfigMapsAndSecretsAreLeftAlone(t *testing.T) {
+	ctx := context.Background()
+	cs := fake.NewSimpleClientset(
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: testNS, ResourceVersion: "1"},
+			Data: map[string]string{"ca.crt": "x"}},
+	)
+	if _, _, err := updateConfigMap(ctx, cs, testNS, "kube-root-ca.crt", "1", map[string]string{"ca.crt": "y"}); !errors.Is(err, ErrConfigMapSystem) {
+		t.Errorf("kube-root-ca.crt: err = %v", err)
+	}
+	if _, _, err := updateConfigMap(ctx, cs, testNS, requestsPrefix+"team", "1", nil); !errors.Is(err, ErrConfigMapSystem) {
+		t.Errorf("saved requests: err = %v", err)
+	}
+	for _, typ := range []corev1.SecretType{"helm.sh/release.v1", corev1.SecretTypeServiceAccountToken} {
+		if !systemSecret(typ) {
+			t.Errorf("%s should be a system secret", typ)
+		}
+	}
+	for _, typ := range []corev1.SecretType{corev1.SecretTypeOpaque, corev1.SecretTypeTLS, corev1.SecretTypeDockerConfigJson} {
+		if systemSecret(typ) {
+			t.Errorf("%s should be editable", typ)
+		}
+	}
+}
+
 func TestReadersAreCountedPerConfigMap(t *testing.T) {
 	ctx := context.Background()
 	dep := func(name, cm string) *appsv1.Deployment {

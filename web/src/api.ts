@@ -303,6 +303,8 @@ export interface SecretSummary {
   name: string;
   type: string;
   keys: string[];
+  /** A Helm release or a service account token: shown, never changed. */
+  system?: boolean;
 }
 
 /** A ConfigMap as the list shows it. */
@@ -344,6 +346,8 @@ export interface ConfigMapData {
   binaryKeys?: string[];
   release?: string;
   immutable?: boolean;
+  /** Kept by the cluster or the portal: shown, never changed. */
+  system?: boolean;
   /** Sent back with a change, so concurrent edits do not overwrite. */
   version: string;
   usedBy: ConfigMapUsage[];
@@ -354,6 +358,7 @@ export interface SecretData {
   name: string;
   type: string;
   data: Record<string, string>;
+  system?: boolean;
 }
 
 export interface MetricPoint {

@@ -19,6 +19,7 @@ import (
 var (
 	ErrConfigMapChanged   = errors.New("someone changed this ConfigMap since you opened it — reload to see their changes, then make yours again")
 	ErrConfigMapImmutable = errors.New("this ConfigMap is immutable: Kubernetes refuses any change to it, and it has to be replaced instead")
+	ErrConfigMapSystem    = errors.New("this ConfigMap is kept by the cluster or by the portal itself, and is not changed by hand")
 )
 
 // ConfigMapSummary is a ConfigMap as the list shows it.
@@ -49,6 +50,8 @@ type ConfigMapData struct {
 	BinaryKeys []string `json:"binaryKeys,omitempty"`
 	Release    string   `json:"release,omitempty"`
 	Immutable  bool     `json:"immutable,omitempty"`
+	// System: kept by the cluster or the portal, so shown and never changed.
+	System bool `json:"system,omitempty"`
 	// Version is sent back with a change, so that two people editing at once
 	// do not silently overwrite each other.
 	Version string  `json:"version"`
@@ -156,6 +159,7 @@ func configMapData(c *corev1.ConfigMap) *ConfigMapData {
 		Data:      c.Data,
 		Release:   c.Annotations["meta.helm.sh/release-name"],
 		Immutable: c.Immutable != nil && *c.Immutable,
+		System:    systemConfigMap(c.Name),
 		Version:   c.ResourceVersion,
 	}
 	if d.Data == nil {
@@ -172,6 +176,9 @@ func configMapData(c *corev1.ConfigMap) *ConfigMapData {
 // CreateConfigMap creates a ConfigMap. It returns a description of what it
 // holds — key names, never values — for the audit trail.
 func (m *Manager) CreateConfigMap(ctx context.Context, asUser, namespace, name string, data map[string]string) (string, error) {
+	if systemConfigMap(name) {
+		return "", ErrConfigMapSystem
+	}
 	cs, err := m.Clientset(asUser)
 	if err != nil {
 		return "", err
@@ -199,6 +206,9 @@ func (m *Manager) UpdateConfigMap(ctx context.Context, asUser, namespace, name, 
 }
 
 func updateConfigMap(ctx context.Context, cs kubernetes.Interface, namespace, name, version string, data map[string]string) (*ConfigMapData, string, error) {
+	if systemConfigMap(name) {
+		return nil, "", ErrConfigMapSystem
+	}
 	cms := cs.CoreV1().ConfigMaps(namespace)
 	c, err := cms.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -233,6 +243,9 @@ func updateConfigMap(ctx context.Context, cs kubernetes.Interface, namespace, na
 
 // DeleteConfigMap deletes a ConfigMap and says which keys went with it.
 func (m *Manager) DeleteConfigMap(ctx context.Context, asUser, namespace, name string) (string, error) {
+	if systemConfigMap(name) {
+		return "", ErrConfigMapSystem
+	}
 	cs, err := m.Clientset(asUser)
 	if err != nil {
 		return "", err

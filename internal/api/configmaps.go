@@ -204,6 +204,8 @@ func (s *Server) handleRestartWorkload(w http.ResponseWriter, r *http.Request) {
 // with: what the API said, where it said something a person can act on.
 func kubeStatus(err error) int {
 	switch {
+	case errors.Is(err, kube.ErrConfigMapSystem), errors.Is(err, kube.ErrSecretSystem):
+		return http.StatusUnprocessableEntity
 	case apierrors.IsNotFound(err):
 		return http.StatusNotFound
 	case apierrors.IsAlreadyExists(err), apierrors.IsConflict(err):

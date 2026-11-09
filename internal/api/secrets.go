@@ -72,7 +72,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), kubeStatus(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "created", "secret": body.Name})
@@ -96,7 +96,7 @@ func (s *Server) handleUpdateSecret(w http.ResponseWriter, r *http.Request) {
 		Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), kubeStatus(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated", "secret": name})
@@ -114,7 +114,7 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 		Success: err == nil, Error: errStr(err), Detail: detail,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), kubeStatus(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "secret": name})

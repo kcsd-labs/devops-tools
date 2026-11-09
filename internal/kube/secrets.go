@@ -2,26 +2,43 @@ package kube
 
 import (
 	"context"
+	"errors"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"devops-tools/internal/changes"
 )
 
+// ErrSecretSystem refuses a change to a secret somebody else keeps.
+var ErrSecretSystem = errors.New("this secret is kept by Helm or by Kubernetes, and is not changed by hand")
+
+// systemSecretTypes are the secrets nobody edits by hand. A Helm release
+// secret is the release's history: change or delete it and rollback and the
+// next upgrade break. A service account token is what something signs in with.
+var systemSecretTypes = map[corev1.SecretType]bool{
+	"helm.sh/release.v1":                 true,
+	corev1.SecretTypeServiceAccountToken: true,
+}
+
+func systemSecret(t corev1.SecretType) bool { return systemSecretTypes[t] }
+
 // SecretSummary describes a secret without revealing anything: name, type and
 // the key names only.
 type SecretSummary struct {
-	Name string   `json:"name"`
-	Type string   `json:"type"`
-	Keys []string `json:"keys"`
+	Name   string   `json:"name"`
+	Type   string   `json:"type"`
+	Keys   []string `json:"keys"`
+	System bool     `json:"system,omitempty"`
 }
 
 // SecretData carries the decoded values, for viewing and editing.
 type SecretData struct {
-	Name string            `json:"name"`
-	Type string            `json:"type"`
-	Data map[string]string `json:"data"`
+	Name   string            `json:"name"`
+	Type   string            `json:"type"`
+	Data   map[string]string `json:"data"`
+	System bool              `json:"system,omitempty"`
 }
 
 // ListSecrets returns the secrets of a namespace without their values.
@@ -36,7 +53,7 @@ func (m *Manager) ListSecrets(ctx context.Context, asUser, namespace string, inc
 	}
 	opts := metav1.ListOptions{}
 	if !includeSystem {
-		opts.FieldSelector = "type!=helm.sh/release.v1,type!=kubernetes.io/service-account-token"
+		opts.FieldSelector = "type!=helm.sh/release.v1,type!=kubernetes.io/service-account-token" // systemSecretTypes
 	}
 	list, err := cs.CoreV1().Secrets(namespace).List(ctx, opts)
 	if err != nil {
@@ -49,7 +66,7 @@ func (m *Manager) ListSecrets(ctx context.Context, asUser, namespace string, inc
 		for k := range s.Data {
 			keys = append(keys, k)
 		}
-		out = append(out, SecretSummary{Name: s.Name, Type: string(s.Type), Keys: keys})
+		out = append(out, SecretSummary{Name: s.Name, Type: string(s.Type), Keys: keys, System: systemSecret(s.Type)})
 	}
 	return out, nil
 }
@@ -68,7 +85,7 @@ func (m *Manager) GetSecret(ctx context.Context, asUser, namespace, name string)
 	for k, v := range s.Data { // client-go has already decoded base64
 		data[k] = string(v)
 	}
-	return &SecretData{Name: s.Name, Type: string(s.Type), Data: data}, nil
+	return &SecretData{Name: s.Name, Type: string(s.Type), Data: data, System: systemSecret(s.Type)}, nil
 }
 
 // CreateSecret creates a secret, defaulting to type Opaque. Values are passed
@@ -81,6 +98,9 @@ func (m *Manager) CreateSecret(ctx context.Context, asUser, namespace, name, sec
 	t := corev1.SecretType(secretType)
 	if t == "" {
 		t = corev1.SecretTypeOpaque
+	}
+	if systemSecret(t) {
+		return ErrSecretSystem
 	}
 	s := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -106,6 +126,9 @@ func (m *Manager) UpdateSecret(ctx context.Context, asUser, namespace, name stri
 	if err != nil {
 		return "", err
 	}
+	if systemSecret(s.Type) {
+		return "", ErrSecretSystem
+	}
 	before := make(map[string]string, len(s.Data))
 	for k, v := range s.Data {
 		before[k] = string(v)
@@ -130,7 +153,20 @@ func (m *Manager) DeleteSecret(ctx context.Context, asUser, namespace, name stri
 		return "", err
 	}
 	var detail string
-	if s, gerr := cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{}); gerr == nil {
+	s, gerr := cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsForbidden(gerr) {
+		// Its type still has to be known; the portal's own account reads it,
+		// and nothing of it goes further than this check.
+		if own, oerr := m.Clientset(""); oerr == nil {
+			if o, err := own.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{}); err == nil && systemSecret(o.Type) {
+				return "", ErrSecretSystem
+			}
+		}
+	}
+	if gerr == nil {
+		if systemSecret(s.Type) {
+			return "", ErrSecretSystem
+		}
 		// Names only; the values are not needed to say what was removed.
 		held := make(map[string]string, len(s.Data))
 		for k := range s.Data {
