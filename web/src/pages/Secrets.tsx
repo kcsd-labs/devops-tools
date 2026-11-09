@@ -36,6 +36,9 @@ export function Secrets() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null); // null means "create"
   const [name, setName] = useState("");
+  // The type a new secret is created with; empty is Opaque. Set by an import,
+  // so that a TLS secret moved between environments arrives as a TLS secret.
+  const [newType, setNewType] = useState("");
   const [rows, setRows] = useState<Row[]>([{ key: "", value: "" }]);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
@@ -162,6 +165,7 @@ export function Secrets() {
   const openCreate = () => {
     setEditing(null);
     setName("");
+    setNewType("");
     setRows([{ key: "", value: "" }]);
     setFormError("");
     setDirty(false);
@@ -217,7 +221,7 @@ export function Secrets() {
     setBusy(true);
     try {
       if (editing) await api.updateSecret(ns, editing, data);
-      else await api.createSecret(ns, { name: name.trim(), data });
+      else await api.createSecret(ns, { name: name.trim(), type: newType || undefined, data });
       setOpen(false);
       loadSecrets();
     } catch (e: any) {
@@ -292,6 +296,7 @@ export function Secrets() {
       if (!payload || typeof payload.data !== "object") throw new Error("no data field");
       setEditing(null);
       setName(typeof payload.name === "string" ? payload.name : "");
+      setNewType(typeof payload.type === "string" && payload.type !== "Opaque" ? payload.type : "");
       const parsed = Object.entries(payload.data as Record<string, unknown>).map(([key, value]) => ({
         key,
         value: value == null ? "" : String(value),
@@ -471,6 +476,11 @@ export function Secrets() {
                       setDirty(true);
                     }}
                   />
+                  {newType && (
+                    <div className="muted">
+                      Type <span className="mono">{newType}</span>, as the transferred secret had
+                    </div>
+                  )}
                 </div>
               )}
               <div className="row kv-head">
