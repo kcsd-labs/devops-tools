@@ -2610,6 +2610,12 @@ a.seg-btn {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: 16px;
+}
+.fill-page > .tabs {
+  flex: 0 0 auto;
 }
 .term-bar {
   display: flex;
@@ -2631,15 +2637,33 @@ a.seg-btn {
   padding: 7px 12px;
 }
 .term-screen {
-  height: calc(100vh - 380px);
-  min-height: 260px;
+  flex: 1 1 auto;
+  min-height: 200px;
+  display: flex;
   background: #0b1020;
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 10px 4px 10px 12px;
   overflow: hidden;
 }
+.term-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.term-host .xterm,
+.term-host .xterm-viewport {
+  height: 100%;
+}
+.term-host .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+.term-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: #2b3a5c;
+  border-radius: 4px;
+}
 .term-input {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;

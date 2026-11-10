@@ -252,7 +252,11 @@ export default function PodTerminal({
       <div className="term-notice">Every line you send is recorded in the audit trail before it runs.</div>
       {error && <div className="alert">{error}</div>}
 
-      <div className="term-screen" ref={hostRef} onClick={() => open && inputRef.current?.focus()} />
+      {/* The padding sits outside the element xterm measures: inside it, the fit
+          counts rows that are not there and the last one is cut off. */}
+      <div className="term-screen" onClick={() => open && inputRef.current?.focus()}>
+        <div className="term-host" ref={hostRef} />
+      </div>
 
       <div className={"term-input" + (open ? "" : " off")}>
         <span className="term-prompt">›</span>

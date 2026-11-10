@@ -63,7 +63,8 @@ export function PodDetail() {
   }, [namespace, pod, tab]);
 
   return (
-    <div className="page">
+    // The terminal fills the working area, so its prompt is never below the fold.
+    <div className={"page" + (tab === "terminal" ? " fill-page" : "")}>
       <div className="page-head">
         <div>
           <Link to={`/ns/${namespace}/pods`} className="crumb">
