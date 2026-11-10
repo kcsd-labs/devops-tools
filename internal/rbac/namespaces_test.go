@@ -70,24 +70,21 @@ func TestNothingReservedMeansEverything(t *testing.T) {
 	}
 }
 
-// A shell is granted only where it is written out: "everything" in a namespace
-// is every other operation, not this one.
-func TestPodExecIsNotCoveredByEverything(t *testing.T) {
-	a := withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{"*"}})
+// A shell is an operation like the others: "everything" in a namespace
+// includes it, and so does naming it.
+func TestPodExecIsAnOrdinaryOperation(t *testing.T) {
 	roles := []string{"admin"}
-	if !a.Allowed(roles, "abs-dev", config.OpSecretDelete) {
-		t.Fatal("* should still cover the ordinary operations")
-	}
-	if a.Allowed(roles, "abs-dev", config.OpPodExec) {
-		t.Error("* should not grant pod-exec")
-	}
-
-	a = withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{"*", config.OpPodExec}})
+	a := withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{"*"}})
 	if !a.Allowed(roles, "abs-dev", config.OpPodExec) {
-		t.Error("pod-exec written out beside * should be granted")
+		t.Error("* should grant pod-exec")
 	}
-	if got := a.NamespacesForOp(roles, config.OpPodExec); len(got) != 1 || got[0] != "abs-dev" {
-		t.Errorf("NamespacesForOp(pod-exec) = %v", got)
+	a = withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{config.OpLogs}})
+	if a.Allowed(roles, "abs-dev", config.OpPodExec) {
+		t.Error("logs alone should not grant pod-exec")
+	}
+	a = withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{config.OpPodExec}})
+	if !a.Allowed(roles, "abs-dev", config.OpPodExec) {
+		t.Error("pod-exec named should be granted")
 	}
 }
 
@@ -95,7 +92,7 @@ func TestPodExecIsNotCoveredByEverything(t *testing.T) {
 // and not one naming them.
 func TestPodExecNeverInClosedNamespaces(t *testing.T) {
 	a := withNamespaceGrants(
-		config.NamespaceGrant{Namespace: "*", Operations: []string{config.OpPodExec}},
+		config.NamespaceGrant{Namespace: "*", Operations: []string{"*"}},
 		config.NamespaceGrant{Namespace: "kube-system", Operations: []string{config.OpPodExec, config.OpLogs}},
 		config.NamespaceGrant{Namespace: "devops-tools", Operations: []string{config.OpPodExec}},
 	)

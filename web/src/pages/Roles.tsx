@@ -15,7 +15,7 @@ export function Roles() {
   const api = useApi();
   const [roles, setRoles] = useState<Role[]>([]);
   const [operations, setOperations] = useState<string[]>([]);
-  const [sections, setSections] = useState<OpSections>({ namespace: [], explicit: [], global: [], config: [] });
+  const [sections, setSections] = useState<OpSections>({ namespace: [], global: [], config: [] });
   const [namespaces, setNamespaces] = useState<string[]>([]);
   // How many people hold each role. Read-only here on purpose: this page is
   // about what a role permits, and who holds it is decided under Users.
@@ -38,7 +38,6 @@ export function Roles() {
         setOperations(r.operations);
         setSections({
           namespace: r.namespaceOperations ?? [],
-          explicit: r.explicitOperations ?? [],
           global: r.globalOperations ?? [],
           config: r.configurationOptions ?? [],
         });
@@ -150,7 +149,7 @@ export function Roles() {
                             <span className="role-chip">{g.namespace}</span>
                             <span className="muted grant-ops">
                               {g.operations?.includes("*")
-                                ? ["everything", ...g.operations.filter((o) => o !== "*")].join(" + ")
+                                ? "everything"
                                 : g.operations?.join(", ") || "nothing"}
                             </span>
                           </div>
@@ -223,11 +222,7 @@ const CONFIG_OP_LABELS: Record<string, string> = {
 };
 
 /** Which section of the editor each operation belongs in, as the server says. */
-type OpSections = { namespace: string[]; explicit: string[]; global: string[]; config: string[] };
-
-const EXPLICIT_OP_LABELS: Record<string, string> = {
-  "pod-exec": "a shell in the pods, every command recorded",
-};
+type OpSections = { namespace: string[]; global: string[]; config: string[] };
 
 const GLOBAL_OP_LABELS: Record<string, string> = {
   "user-list": "see users and roles",
@@ -256,23 +251,9 @@ function RoleDialog({
   const api = useApi();
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
-  // The operations "everything" stands for, and the ones it leaves out.
-  const available = (group: string[]) => group.filter((o) => operations.includes(o));
-  const nsOps = available(sections.namespace).filter((o) => !sections.explicit.includes(o));
-  const explicitOps = available(sections.explicit);
-
-  // "Everything" never shows beside an operation it leaves out. A grant stored
-  // as both opens as the list it amounts to, so pod-exec is never folded away
-  // out of sight.
   const [grants, setGrants] = useState<NamespaceGrant[]>(
     role?.namespaces?.length
-      ? role.namespaces.map((g) => {
-          const ops = g.operations ?? [];
-          if (ops.includes("*") && ops.some((o) => explicitOps.includes(o))) {
-            return { namespace: g.namespace, operations: [...nsOps, ...ops.filter((o) => o !== "*")] };
-          }
-          return { namespace: g.namespace, operations: ops };
-        })
+      ? role.namespaces.map((g) => ({ namespace: g.namespace, operations: g.operations ?? [] }))
       : [{ namespace: "", operations: [] }]
   );
   const [global, setGlobal] = useState<string[]>(role?.global ?? []);
@@ -283,6 +264,8 @@ function RoleDialog({
   const [error, setError] = useState("");
 
   // Each section shows what the deployment offers and the server places there.
+  const available = (group: string[]) => group.filter((o) => operations.includes(o));
+  const nsOps = available(sections.namespace);
   const configOps = available(sections.config);
   const globalOps = available(sections.global);
 
@@ -418,10 +401,7 @@ function RoleDialog({
                   <input
                     type="checkbox"
                     checked={g.operations.includes("*")}
-                    // Unticked, the list opens with all of it ticked: what
-                    // "everything" granted stays granted, and adding pod-exec
-                    // is one more tick rather than twenty-seven.
-                    onChange={(e) => setGrant(i, { operations: e.target.checked ? ["*"] : [...nsOps] })}
+                    onChange={(e) => setGrant(i, { operations: e.target.checked ? ["*"] : [] })}
                   />
                   <span>everything</span>
                 </label>
@@ -434,9 +414,6 @@ function RoleDialog({
                 </button>
               </div>
 
-              {/* One list for every operation, folded away under "everything".
-                  pod-exec is in it and nowhere else: to grant it, untick
-                  "everything" and tick it here. */}
               {!g.operations.includes("*") && (
                 <div className="op-grid">
                   {nsOps.map((op) => (
@@ -447,22 +424,6 @@ function RoleDialog({
                         onChange={() => toggleOp(i, op)}
                       />
                       <span>{op}</span>
-                    </label>
-                  ))}
-                  {explicitOps.map((op) => (
-                    <label
-                      key={op}
-                      className="check op-explicit"
-                      title={`${EXPLICIT_OP_LABELS[op] ?? op}. Not included in everything: granted only when ticked.`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={g.operations.includes(op)}
-                        onChange={() => toggleOp(i, op)}
-                      />
-                      <span>
-                        {op} <span className="muted">· not in everything</span>
-                      </span>
                     </label>
                   ))}
                 </div>

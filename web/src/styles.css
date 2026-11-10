@@ -1410,10 +1410,6 @@ body {
   gap: 6px 14px;
   margin-bottom: 14px;
 }
-/* An operation "everything" does not cover: same list, marked apart. */
-.op-grid .op-explicit {
-  color: var(--warn);
-}
 
 /* "+ Add namespace" and "+ Add configuration path" continue the list above
    them. As ordinary small buttons they sat loose between two blocks, close

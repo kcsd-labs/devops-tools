@@ -410,7 +410,7 @@ config:
         name: ""
         key: GITLAB_TOKEN
 
-  # A shell in a pod, for roles granted pod-exec by name — "*" does not grant it.
+  # A shell in a pod, for roles granted pod-exec (or "*") in the namespace.
   # Never opened in cluster.hiddenNamespaces or this service's own namespace.
   # Every line typed is written to the audit trail before it reaches the shell.
   exec:

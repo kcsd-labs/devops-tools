@@ -213,12 +213,9 @@ func (a *Authorizer) VisibleNamespaces(roles []string) []string {
 	return sortedKeys(set)
 }
 
-// hasOp reports whether a grant's operations include op. "*" covers every
-// operation but the explicit ones, which have to be written out.
 func hasOp(ops []string, op string) bool {
-	explicit := config.Explicit(op)
 	for _, o := range ops {
-		if o == op || (o == "*" && !explicit) {
+		if o == "*" || o == op {
 			return true
 		}
 	}
