@@ -429,24 +429,21 @@ function RoleDialog({
                 </button>
               </div>
 
-              {/* One list for every operation. Under "everything" the ones it
-                  covers stay visible, ticked and locked, so what it grants is
-                  on screen; the ones it does not cover stay free to tick. */}
+              {/* One list for every operation. Under "everything" the list it
+                  covers folds away, and only what it does not cover is left to
+                  tick. */}
               <div className="op-grid">
-                {nsOps.map((op) => {
-                  const all = g.operations.includes("*");
-                  return (
-                    <label key={op} className={"check" + (all ? " covered" : "")}>
+                {!g.operations.includes("*") &&
+                  nsOps.map((op) => (
+                    <label key={op} className="check">
                       <input
                         type="checkbox"
-                        checked={all || g.operations.includes(op)}
-                        disabled={all}
+                        checked={g.operations.includes(op)}
                         onChange={() => toggleOp(i, op)}
                       />
                       <span>{op}</span>
                     </label>
-                  );
-                })}
+                  ))}
                 {explicitOps.map((op) => (
                   <label
                     key={op}
