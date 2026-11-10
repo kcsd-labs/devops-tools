@@ -105,27 +105,44 @@ func harmlessHostPath(p string) bool {
 	return strings.HasPrefix(p, "/usr/share/zoneinfo/")
 }
 
-// FindShell returns the shell to open: bash where the image has it, sh
-// otherwise. Asked of the container itself, with a command that needs only sh.
-func (m *Manager) FindShell(ctx context.Context, asUser, namespace, pod, container string) (string, error) {
+// ShellInfo is what a container offers a shell: which one, and the character
+// set its locale writes in.
+type ShellInfo struct {
+	Path string
+	// Charset is what `locale charmap` answers, or "" where the image has no
+	// locale command.
+	Charset string
+}
+
+// FindShell returns the shell to open — bash where the image has it, sh
+// otherwise — and the character set of the container's locale. Asked of the
+// container itself, with a command that needs only sh.
+func (m *Manager) FindShell(ctx context.Context, asUser, namespace, pod, container string) (ShellInfo, error) {
 	var out, errOut bytes.Buffer
 	err := m.stream(ctx, asUser, namespace, pod, container,
-		[]string{"sh", "-c", "command -v bash || command -v sh"}, false, nil, &out, &errOut, nil)
-	path := strings.TrimSpace(out.String())
-	if err != nil || path == "" {
-		msg := err
-		if msg == nil {
-			msg = errors.New(strings.TrimSpace(errOut.String()))
+		[]string{"sh", "-c", "command -v bash || command -v sh; locale charmap 2>/dev/null || true"},
+		false, nil, &out, &errOut, nil)
+	return parseShellProbe(out.String(), errOut.String(), err)
+}
+
+func parseShellProbe(out, errOut string, err error) (ShellInfo, error) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	path := strings.TrimSpace(lines[0])
+	if err != nil || !strings.HasPrefix(path, "/") {
+		msg := strings.TrimSpace(errOut)
+		if err != nil {
+			msg = strings.TrimSpace(err.Error() + " " + msg)
 		}
-		if strings.Contains(msg.Error(), "not found") || strings.Contains(msg.Error(), "no such file") {
-			return "", ErrNoShell
+		if msg == "" || strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
+			return ShellInfo{}, ErrNoShell
 		}
-		return "", fmt.Errorf("could not look for a shell: %w", msg)
+		return ShellInfo{}, fmt.Errorf("could not look for a shell: %s", msg)
 	}
-	if i := strings.IndexByte(path, '\n'); i >= 0 {
-		path = path[:i]
+	info := ShellInfo{Path: path}
+	if len(lines) > 1 {
+		info.Charset = strings.TrimSpace(lines[len(lines)-1])
 	}
-	return path, nil
+	return info, nil
 }
 
 // OpenShell runs an interactive shell with a terminal, until it exits or ctx

@@ -45,3 +45,33 @@ func TestCredentialsInCommandsAreMasked(t *testing.T) {
 		}
 	}
 }
+
+func TestALocaleOtherThanUTF8IsConverted(t *testing.T) {
+	for _, none := range []string{"", "UTF-8", "utf8", "ANSI_X3.4-1968"} {
+		if LookupCharset(none) != nil {
+			t.Errorf("%q should need no conversion", none)
+		}
+	}
+	c := LookupCharset("CP1251")
+	if c == nil {
+		t.Fatal("CP1251 should be known")
+	}
+	// "команда не найдена" as bash prints it under ru_RU.CP1251.
+	cp := []byte{0xea, 0xee, 0xec, 0xe0, 0xed, 0xe4, 0xe0}
+	got, err := c.Decoder().Bytes(cp)
+	if err != nil || string(got) != "команда" {
+		t.Errorf("decoded %q, %v", got, err)
+	}
+	enc, err := c.Encode("echo привет")
+	if err != nil || enc != "echo \xef\xf0\xe8\xe2\xe5\xf2" {
+		t.Errorf("encoded %q, %v", enc, err)
+	}
+	if _, err := c.Encode("echo 😀"); err == nil {
+		t.Error("a character CP1251 has no place for should be refused, not replaced")
+	}
+	for _, name := range []string{"KOI8-R", "ISO-8859-5"} {
+		if LookupCharset(name) == nil {
+			t.Errorf("%s should be known", name)
+		}
+	}
+}

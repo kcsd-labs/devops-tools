@@ -43,6 +43,7 @@ export default function PodTerminal({
   const [refused, setRefused] = useState("");
   const [closedReason, setClosedReason] = useState("");
   const [shell, setShell] = useState("");
+  const [charset, setCharset] = useState("");
   const [until, setUntil] = useState(0);
   const [idleMinutes, setIdleMinutes] = useState(0);
   const [, setTick] = useState(0);
@@ -131,6 +132,7 @@ export default function PodTerminal({
       const m = JSON.parse(ev.data);
       if (m.type === "ready") {
         setShell(m.shell);
+        setCharset(m.charset ?? "");
         setUntil(m.until);
         setIdleMinutes(Math.round(m.idleSeconds / 60));
         setPhase("open");
@@ -231,6 +233,14 @@ export default function PodTerminal({
         {open ? (
           <>
             <span className="term-live">● {shell}</span>
+            {charset && (
+              <span
+                className="muted"
+                title={`The container's locale writes ${charset}; it is converted to and from UTF-8 here.`}
+              >
+                {charset} ⇄ UTF-8
+              </span>
+            )}
             <span className="muted">
               ends in {minutesLeft(until)} · closes after {idleMinutes} min without input
             </span>

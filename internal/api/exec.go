@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	"golang.org/x/text/transform"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/remotecommand"
 
@@ -147,7 +148,7 @@ func (s *Server) handleExecTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	ticket, err := s.auth.IssueTicket(auth.Ticket{
 		Purpose: ticketExec, User: user.Username, Namespace: namespace, Pod: pod,
-		Container: t.Container, Shell: sh, Until: until.Unix(),
+		Container: t.Container, Shell: sh.Path, Charset: sh.Charset, Until: until.Unix(),
 	}, execTicketTTL)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -156,7 +157,7 @@ func (s *Server) handleExecTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ticket":      ticket,
 		"container":   t.Container,
-		"shell":       sh,
+		"shell":       sh.Path,
 		"idleSeconds": int(s.cfg.Exec.IdleTimeout.Seconds()),
 		"until":       until.UnixMilli(),
 	})
@@ -311,17 +312,31 @@ func (x *shellSession) run(parent context.Context, until time.Time) {
 		cancel()
 	}
 
+	// A container whose locale is not UTF-8 is read and written through its
+	// own character set; the record keeps the line as it was typed.
+	charset := shell.LookupCharset(x.t.Charset)
+	var out io.Writer = x
+	var decoded *transform.Writer
+	if charset != nil {
+		decoded = transform.NewWriter(x, charset.Decoder())
+		out = decoded
+	}
+
 	stdin, stdinW := io.Pipe()
 	shellDone := make(chan error, 1)
 	go func() {
 		shellDone <- x.s.opener()(ctx, x.t.User, x.t.Namespace, x.t.Pod, x.t.Container, x.t.Shell,
-			stdin, x, x)
+			stdin, out, x)
 	}()
 
-	x.status(map[string]any{
+	ready := map[string]any{
 		"type": "ready", "session": x.id, "shell": x.t.Shell, "container": x.t.Container,
 		"until": until.UnixMilli(), "idleSeconds": int(cfg.IdleTimeout.Seconds()),
-	})
+	}
+	if charset != nil {
+		ready["charset"] = charset.Name
+	}
+	x.status(ready)
 
 	// Idle: reset by what the person sends, not by what the shell prints — a
 	// tail -f left running is not someone at the keyboard.
@@ -397,7 +412,14 @@ loop:
 				idle.Reset(cfg.IdleTimeout)
 				x.seq++
 				x.lines++
-				if err := shell.CheckLine(m.Text); err != nil {
+				send := m.Text
+				err := shell.CheckLine(m.Text)
+				if err == nil && charset != nil {
+					if send, err = charset.Encode(m.Text); err != nil {
+						err = fmt.Errorf("the line has a character the container's locale (%s) cannot write", charset.Name)
+					}
+				}
+				if err != nil {
 					e := x.entry(opExecCommand, shell.Mask(m.Text))
 					e.Success, e.Error = false, err.Error()
 					x.s.audit.Log(e)
@@ -406,7 +428,7 @@ loop:
 				}
 				// The record first. Only a line on record reaches the shell.
 				x.s.audit.Log(x.entry(opExecCommand, shell.Mask(m.Text)))
-				if _, err := stdinW.Write([]byte(m.Text + "\r")); err != nil {
+				if _, err := stdinW.Write([]byte(send + "\r")); err != nil {
 					end("the shell stopped reading")
 					break loop
 				}
@@ -440,6 +462,9 @@ loop:
 	case <-shellDone:
 	case <-time.After(5 * time.Second):
 		slog.Warn("a shell did not end with its session", "session", x.id, "pod", x.t.Pod)
+	}
+	if decoded != nil {
+		_ = decoded.Close() // whatever a multi-byte set left half-written
 	}
 
 	reasonMu.Lock()

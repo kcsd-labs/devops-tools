@@ -60,6 +60,7 @@ type Ticket struct {
 	User      string `json:"usr,omitempty"`
 	Container string `json:"ctr,omitempty"`
 	Shell     string `json:"sh,omitempty"`
+	Charset   string `json:"cs,omitempty"`
 	Until     int64  `json:"until,omitempty"`
 }
 

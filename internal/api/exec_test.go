@@ -97,6 +97,10 @@ func fakeShell(ev *events) shellOpener {
 }
 
 func shellServer(t *testing.T, ev *events, idle time.Duration) (*httptest.Server, func()) {
+	return shellServerIn(t, ev, idle, "")
+}
+
+func shellServerIn(t *testing.T, ev *events, idle time.Duration, charset string) (*httptest.Server, func()) {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(trailHandler{ev}))
 	s := &Server{
@@ -113,7 +117,7 @@ func shellServer(t *testing.T, ev *events, idle time.Duration) (*httptest.Server
 		}
 		defer conn.Close()
 		x := &shellSession{s: s, conn: conn, id: "t1", started: time.Now(),
-			t:     auth.Ticket{User: "anna", Namespace: "abs-dev", Pod: "api-1", Container: "app", Shell: "/bin/sh"},
+			t:     auth.Ticket{User: "anna", Namespace: "abs-dev", Pod: "api-1", Container: "app", Shell: "/bin/sh", Charset: charset},
 			sizes: make(chan remotecommand.TerminalSize, 4)}
 		x.run(r.Context(), time.Now().Add(time.Minute))
 	}))
@@ -276,5 +280,41 @@ func TestShellLimitsPerPerson(t *testing.T) {
 	l.release("anna")
 	if !l.acquire("anna", 2) {
 		t.Error("closing one should free a place")
+	}
+}
+
+// A container set to ru_RU.CP1251: what is typed goes in as Windows-1251, what
+// it prints comes out as UTF-8, and the record holds the line as typed.
+func TestALocaleOtherThanUTF8IsConvertedBothWays(t *testing.T) {
+	ev := &events{}
+	srv, done := shellServerIn(t, ev, time.Minute, "CP1251")
+	defer done()
+	c := dial(t, srv)
+	defer c.Close()
+
+	_, ready := readUntil(t, c, "ready")
+	if ready["charset"] != "CP1251" {
+		t.Errorf("ready says charset %v", ready["charset"])
+	}
+	sendMsg(t, c, execMessage{Type: "line", Text: "echo привет"})
+	sendMsg(t, c, execMessage{Type: "line", Text: "echo 😀"})
+	before, refused := readUntil(t, c, "refused")
+	if !strings.Contains(refused["message"].(string), "CP1251") {
+		t.Errorf("refusal says %q", refused["message"])
+	}
+	sendMsg(t, c, execMessage{Type: "key", Key: "d"})
+	after, _ := readUntil(t, c, "closed")
+
+	// The fake shell echoes what it was given: the CP1251 bytes, decoded back
+	// to UTF-8 on the way out.
+	if out := before + after; !strings.Contains(out, "out: echo привет") {
+		t.Errorf("output %q", out)
+	}
+	waitFor(t, ev, "shell echo \xef\xf0\xe8\xe2\xe5\xf2") // привет in Windows-1251
+	waitFor(t, ev, "trail pod-exec-command echo привет")
+	for _, e := range ev.snapshot() {
+		if strings.HasPrefix(e, "shell echo 😀") || strings.HasPrefix(e, "shell echo ?") {
+			t.Errorf("a line the locale cannot write reached the shell: %q", e)
+		}
 	}
 }

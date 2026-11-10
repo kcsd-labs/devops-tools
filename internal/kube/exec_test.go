@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -27,5 +28,19 @@ func TestTimeZoneMountsDoNotCloseAPodToAShell(t *testing.T) {
 		if r := nodeAccess(hostPathSpec(p)); !strings.Contains(r, "hostPath") {
 			t.Errorf("%s: allowed", p)
 		}
+	}
+}
+
+func TestShellProbe(t *testing.T) {
+	info, err := parseShellProbe("/usr/bin/bash\nCP1251\n", "", nil)
+	if err != nil || info.Path != "/usr/bin/bash" || info.Charset != "CP1251" {
+		t.Errorf("got %+v, %v", info, err)
+	}
+	info, err = parseShellProbe("/bin/sh\n", "", nil)
+	if err != nil || info.Path != "/bin/sh" || info.Charset != "" {
+		t.Errorf("no locale command: got %+v, %v", info, err)
+	}
+	if _, err := parseShellProbe("", "exec: \"sh\": executable file not found in $PATH", errors.New("command terminated")); err == nil {
+		t.Error("no sh should be an error")
 	}
 }
