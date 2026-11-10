@@ -429,40 +429,41 @@ function RoleDialog({
                 </button>
               </div>
 
-              {!g.operations.includes("*") && (
-                <div className="op-grid">
-                  {nsOps.map((op) => (
-                    <label key={op} className="check">
+              {/* One list for every operation. Under "everything" the ones it
+                  covers stay visible, ticked and locked, so what it grants is
+                  on screen; the ones it does not cover stay free to tick. */}
+              <div className="op-grid">
+                {nsOps.map((op) => {
+                  const all = g.operations.includes("*");
+                  return (
+                    <label key={op} className={"check" + (all ? " covered" : "")}>
                       <input
                         type="checkbox"
-                        checked={g.operations.includes(op)}
+                        checked={all || g.operations.includes(op)}
+                        disabled={all}
                         onChange={() => toggleOp(i, op)}
                       />
                       <span>{op}</span>
                     </label>
-                  ))}
-                </div>
-              )}
-
-              {explicitOps.length > 0 && (
-                <div className="op-grid op-explicit">
-                  {explicitOps.map((op) => (
-                    <label key={op} className="check" title="Not included in everything: granted only when ticked">
-                      <input
-                        type="checkbox"
-                        checked={g.operations.includes(op)}
-                        onChange={() => toggleOp(i, op)}
-                      />
-                      <span>
-                        {op}{" "}
-                        <span className="muted">
-                          — {EXPLICIT_OP_LABELS[op] ?? op}; not included in everything
-                        </span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+                {explicitOps.map((op) => (
+                  <label
+                    key={op}
+                    className="check op-explicit"
+                    title={`${EXPLICIT_OP_LABELS[op] ?? op}. Not included in everything: granted only when ticked.`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={g.operations.includes(op)}
+                      onChange={() => toggleOp(i, op)}
+                    />
+                    <span>
+                      {op} <span className="muted">· not in everything</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
           ))}
 

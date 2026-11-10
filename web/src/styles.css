@@ -1410,12 +1410,13 @@ body {
   gap: 6px 14px;
   margin-bottom: 14px;
 }
-/* Operations "everything" does not include sit on their own line under it, so
-   ticking "everything" never looks like it granted them. */
-.op-explicit {
-  grid-template-columns: 1fr;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border);
+/* Under "everything" the operations it covers are shown ticked and locked. */
+.op-grid .check.covered {
+  opacity: 0.55;
+}
+/* An operation "everything" does not cover: same list, marked apart. */
+.op-grid .op-explicit {
+  color: var(--warn);
 }
 
 /* "+ Add namespace" and "+ Add configuration path" continue the list above
