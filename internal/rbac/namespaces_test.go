@@ -69,3 +69,48 @@ func TestNothingReservedMeansEverything(t *testing.T) {
 		t.Error("with nothing reserved, * should reach kube-system")
 	}
 }
+
+// A shell is granted only where it is written out: "everything" in a namespace
+// is every other operation, not this one.
+func TestPodExecIsNotCoveredByEverything(t *testing.T) {
+	a := withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{"*"}})
+	roles := []string{"admin"}
+	if !a.Allowed(roles, "abs-dev", config.OpSecretDelete) {
+		t.Fatal("* should still cover the ordinary operations")
+	}
+	if a.Allowed(roles, "abs-dev", config.OpPodExec) {
+		t.Error("* should not grant pod-exec")
+	}
+
+	a = withNamespaceGrants(config.NamespaceGrant{Namespace: "abs-dev", Operations: []string{"*", config.OpPodExec}})
+	if !a.Allowed(roles, "abs-dev", config.OpPodExec) {
+		t.Error("pod-exec written out beside * should be granted")
+	}
+	if got := a.NamespacesForOp(roles, config.OpPodExec); len(got) != 1 || got[0] != "abs-dev" {
+		t.Errorf("NamespacesForOp(pod-exec) = %v", got)
+	}
+}
+
+// No grant opens a shell in the cluster's namespaces or the portal's — not "*",
+// and not one naming them.
+func TestPodExecNeverInClosedNamespaces(t *testing.T) {
+	a := withNamespaceGrants(
+		config.NamespaceGrant{Namespace: "*", Operations: []string{config.OpPodExec}},
+		config.NamespaceGrant{Namespace: "kube-system", Operations: []string{config.OpPodExec, config.OpLogs}},
+		config.NamespaceGrant{Namespace: "devops-tools", Operations: []string{config.OpPodExec}},
+	)
+	a.CloseToExec([]string{"kube-*", "default", "devops-tools"})
+	roles := []string{"admin"}
+
+	if !a.Allowed(roles, "abs-dev", config.OpPodExec) {
+		t.Error("pod-exec on * should reach an ordinary namespace")
+	}
+	for _, ns := range []string{"kube-system", "default", "devops-tools"} {
+		if a.Allowed(roles, ns, config.OpPodExec) {
+			t.Errorf("%s: a shell should never be granted there", ns)
+		}
+	}
+	if !a.Allowed(roles, "kube-system", config.OpLogs) {
+		t.Error("closing kube-system to a shell should not close it to a grant naming it for logs")
+	}
+}

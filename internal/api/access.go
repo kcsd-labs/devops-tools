@@ -241,6 +241,7 @@ func (s *Server) handleListRoles(w http.ResponseWriter, _ *http.Request) {
 		"roles":                s.store.ListRoles(),
 		"operations":           s.operations,
 		"namespaceOperations":  config.NamespaceOperations(),
+		"explicitOperations":   config.ExplicitOperations(),
 		"globalOperations":     config.GlobalOperations(),
 		"configurationOptions": config.ConfigOperations(),
 		// How many people hold each role. Shown in the list so the question

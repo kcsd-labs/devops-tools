@@ -535,6 +535,8 @@ export function createApi(token: string | undefined) {
             can be in two of these — audit-read means different things per
             namespace and globally. */
         namespaceOperations: string[];
+        /** Not covered by "*": a grant holds one only where it is written out. */
+        explicitOperations?: string[];
         globalOperations: string[];
         configurationOptions: string[];
         /** How many people hold each role, by role name. */

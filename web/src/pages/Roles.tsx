@@ -15,7 +15,7 @@ export function Roles() {
   const api = useApi();
   const [roles, setRoles] = useState<Role[]>([]);
   const [operations, setOperations] = useState<string[]>([]);
-  const [sections, setSections] = useState<OpSections>({ namespace: [], global: [], config: [] });
+  const [sections, setSections] = useState<OpSections>({ namespace: [], explicit: [], global: [], config: [] });
   const [namespaces, setNamespaces] = useState<string[]>([]);
   // How many people hold each role. Read-only here on purpose: this page is
   // about what a role permits, and who holds it is decided under Users.
@@ -38,6 +38,7 @@ export function Roles() {
         setOperations(r.operations);
         setSections({
           namespace: r.namespaceOperations ?? [],
+          explicit: r.explicitOperations ?? [],
           global: r.globalOperations ?? [],
           config: r.configurationOptions ?? [],
         });
@@ -149,7 +150,7 @@ export function Roles() {
                             <span className="role-chip">{g.namespace}</span>
                             <span className="muted grant-ops">
                               {g.operations?.includes("*")
-                                ? "everything"
+                                ? ["everything", ...g.operations.filter((o) => o !== "*")].join(" + ")
                                 : g.operations?.join(", ") || "nothing"}
                             </span>
                           </div>
@@ -222,7 +223,11 @@ const CONFIG_OP_LABELS: Record<string, string> = {
 };
 
 /** Which section of the editor each operation belongs in, as the server says. */
-type OpSections = { namespace: string[]; global: string[]; config: string[] };
+type OpSections = { namespace: string[]; explicit: string[]; global: string[]; config: string[] };
+
+const EXPLICIT_OP_LABELS: Record<string, string> = {
+  "pod-exec": "a shell in the pods, every command recorded",
+};
 
 const GLOBAL_OP_LABELS: Record<string, string> = {
   "user-list": "see users and roles",
@@ -265,7 +270,10 @@ function RoleDialog({
 
   // Each section shows what the deployment offers and the server places there.
   const available = (group: string[]) => group.filter((o) => operations.includes(o));
-  const nsOps = available(sections.namespace);
+  const nsOps = available(sections.namespace).filter((o) => !sections.explicit.includes(o));
+  // Granted only by name: "everything" leaves them out, so they are offered
+  // beside it rather than inside the list it hides.
+  const explicitOps = available(sections.explicit);
   const configOps = available(sections.config);
   const globalOps = available(sections.global);
 
@@ -401,7 +409,14 @@ function RoleDialog({
                   <input
                     type="checkbox"
                     checked={g.operations.includes("*")}
-                    onChange={(e) => setGrant(i, { operations: e.target.checked ? ["*"] : [] })}
+                    onChange={(e) =>
+                      setGrant(i, {
+                        operations: [
+                          ...(e.target.checked ? ["*"] : []),
+                          ...g.operations.filter((o) => explicitOps.includes(o)),
+                        ],
+                      })
+                    }
                   />
                   <span>everything</span>
                 </label>
@@ -424,6 +439,26 @@ function RoleDialog({
                         onChange={() => toggleOp(i, op)}
                       />
                       <span>{op}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {explicitOps.length > 0 && (
+                <div className="op-grid op-explicit">
+                  {explicitOps.map((op) => (
+                    <label key={op} className="check" title="Not included in everything: granted only when ticked">
+                      <input
+                        type="checkbox"
+                        checked={g.operations.includes(op)}
+                        onChange={() => toggleOp(i, op)}
+                      />
+                      <span>
+                        {op}{" "}
+                        <span className="muted">
+                          — {EXPLICIT_OP_LABELS[op] ?? op}; not included in everything
+                        </span>
+                      </span>
                     </label>
                   ))}
                 </div>

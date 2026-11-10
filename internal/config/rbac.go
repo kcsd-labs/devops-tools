@@ -25,6 +25,11 @@ const (
 	OpDescribe   = "describe"
 	OpMetrics    = "metrics"
 	OpPodRestart = "pod-restart"
+	// A shell in a container: everything the container can reach, its
+	// environment and its service account token included. Granted only by
+	// name — see ExplicitOperations — and never in the cluster's own
+	// namespaces or the portal's.
+	OpPodExec = "pod-exec"
 	// Where the services in a namespace answer: their addresses, ports and how
 	// many pods are ready behind them. Read only.
 	OpServiceList = "service-list"
@@ -89,7 +94,7 @@ const (
 // NamespaceOperations are granted per namespace.
 func NamespaceOperations() []string {
 	return []string{
-		OpLogs, OpDescribe, OpMetrics, OpPodRestart,
+		OpLogs, OpDescribe, OpMetrics, OpPodRestart, OpPodExec,
 		OpServiceList, OpServiceRequest, OpServiceRequestWrite,
 		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
@@ -97,6 +102,22 @@ func NamespaceOperations() []string {
 		OpAuditRead,
 		OpImageRebuild, OpPipelineDeploy,
 	}
+}
+
+// ExplicitOperations are not covered by "*" in a grant's operations: a role
+// holds one only where it is written out. Every team role here was granted
+// "everything" in its namespaces, and a shell is not something to hand out as
+// a side effect of a word written before it existed.
+func ExplicitOperations() []string { return []string{OpPodExec} }
+
+// Explicit reports whether op is granted only by name.
+func Explicit(op string) bool {
+	for _, e := range ExplicitOperations() {
+		if e == op {
+			return true
+		}
+	}
+	return false
 }
 
 // GlobalOperations belong to no namespace: they govern the portal itself.

@@ -19,6 +19,8 @@ type Authorizer struct {
 	// reserved are the namespaces a "*" grant does not reach — the cluster's
 	// own, from cluster.hiddenNamespaces. Set once, before serving.
 	reserved []string
+	// noExec are the namespaces no grant opens a shell in, by name or not.
+	noExec []string
 }
 
 func New(cfg *config.RBACConfig) *Authorizer {
@@ -35,6 +37,14 @@ func (a *Authorizer) ReserveFromWildcard(patterns []string) {
 	a.reserved = patterns
 }
 
+// CloseToExec refuses a shell in the namespaces matching these patterns,
+// whatever a role says. The cluster's own namespaces, because a shell there is
+// the cluster; the portal's, because its pod holds a token that administers
+// the cluster, and a shell beside it is the same thing by another door.
+func (a *Authorizer) CloseToExec(patterns []string) {
+	a.noExec = patterns
+}
+
 // Replace swaps in a new model atomically; called by the configuration watcher.
 func (a *Authorizer) Replace(cfg *config.RBACConfig) {
 	a.cfg.Store(cfg)
@@ -43,6 +53,9 @@ func (a *Authorizer) Replace(cfg *config.RBACConfig) {
 // Allowed reports whether any of the user's roles permits op in namespace.
 func (a *Authorizer) Allowed(roles []string, namespace, op string) bool {
 	cfg := a.cfg.Load()
+	if op == config.OpPodExec && config.MatchesNamespace(namespace, a.noExec) {
+		return false
+	}
 	for _, role := range roles {
 		spec, ok := cfg.Roles[role]
 		if !ok {
@@ -200,9 +213,12 @@ func (a *Authorizer) VisibleNamespaces(roles []string) []string {
 	return sortedKeys(set)
 }
 
+// hasOp reports whether a grant's operations include op. "*" covers every
+// operation but the explicit ones, which have to be written out.
 func hasOp(ops []string, op string) bool {
+	explicit := config.Explicit(op)
 	for _, o := range ops {
-		if o == "*" || o == op {
+		if o == op || (o == "*" && !explicit) {
 			return true
 		}
 	}
