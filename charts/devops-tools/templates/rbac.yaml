@@ -41,6 +41,12 @@ rules:
     resources: ["pods", "pods/log", "events"]
     verbs: ["get", "list", "watch"]
 
+  # The Terminal tab, for roles granted pod-exec. Every line sent through it is
+  # recorded first; the portal never opens one in its own namespace.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+
   {{- if $cluster }}
   # A role granted "*" names no namespaces, so the list it is shown has to come
   # from the cluster. Without this the page falls back to typing a name.
