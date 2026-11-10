@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -71,7 +72,7 @@ func nodeAccess(spec *corev1.PodSpec) string {
 		return "it shares the node's IPC (hostIPC)"
 	}
 	for _, v := range spec.Volumes {
-		if v.HostPath != nil {
+		if v.HostPath != nil && !harmlessHostPath(v.HostPath.Path) {
 			return "it mounts a directory of the node (hostPath " + v.HostPath.Path + ")"
 		}
 	}
@@ -90,6 +91,18 @@ func nodeAccess(spec *corev1.PodSpec) string {
 		}
 	}
 	return ""
+}
+
+// harmlessHostPath reports whether a node path is only the node's time zone —
+// the usual way an image is given the local time, and nothing a shell could
+// use to reach further into the node.
+func harmlessHostPath(p string) bool {
+	p = path.Clean(p)
+	switch p {
+	case "/etc/localtime", "/etc/timezone", "/usr/share/zoneinfo":
+		return true
+	}
+	return strings.HasPrefix(p, "/usr/share/zoneinfo/")
 }
 
 // FindShell returns the shell to open: bash where the image has it, sh
