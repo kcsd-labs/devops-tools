@@ -2602,3 +2602,73 @@ a.seg-btn {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* --- pod terminal ---------------------------------------------------------
+   Output above, the command line below: nothing typed reaches the shell
+   except through the line, which the server records first. */
+.term {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.term-live {
+  color: var(--ok, #2fb67c);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+}
+.term-notice {
+  font-size: 12.5px;
+  color: var(--warn, #c98a10);
+  background: color-mix(in srgb, var(--warn, #c98a10) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn, #c98a10) 35%, transparent);
+  border-radius: 9px;
+  padding: 7px 12px;
+}
+.term-screen {
+  height: calc(100vh - 380px);
+  min-height: 260px;
+  background: #0b1020;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  overflow: hidden;
+}
+.term-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0b1020;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 6px 8px 6px 14px;
+}
+.term-input.off {
+  border-color: var(--border);
+  opacity: 0.7;
+}
+.term-input input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: #d7deea;
+  font-size: 13.5px;
+  padding: 6px 0;
+}
+.term-prompt {
+  color: var(--accent);
+  font-weight: 700;
+}
+.term-refused {
+  font-size: 12.5px;
+  color: var(--err, #e5484d);
+}
+.term-help {
+  font-size: 12px;
+}

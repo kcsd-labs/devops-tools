@@ -16,6 +16,7 @@ export default defineConfig({
       "/api": {
         target,
         changeOrigin: true,
+        ws: true, // the pod terminal is a WebSocket
       },
     },
   },

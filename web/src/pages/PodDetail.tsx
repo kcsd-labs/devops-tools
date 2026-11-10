@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useApi } from "../useApi";
 import { LogViewer } from "../components/LogViewer";
 import { PodMetrics } from "../components/PodMetrics";
 import { PodGoneBanner } from "../components/PodGoneBanner";
 
-type Tab = "describe" | "logs" | "metrics";
+// The terminal brings xterm.js with it; loaded only when the tab is opened.
+const PodTerminal = lazy(() => import("../components/PodTerminal"));
+
+type Tab = "describe" | "logs" | "metrics" | "terminal";
 
 export function PodDetail() {
   const { namespace = "", pod = "" } = useParams();
@@ -16,6 +19,8 @@ export function PodDetail() {
   const [loading, setLoading] = useState(false);
   const [appLabel, setAppLabel] = useState("");
   const [gone, setGone] = useState(false);
+  const [containers, setContainers] = useState<string[]>([]);
+  const [mayExec, setMayExec] = useState(false);
 
   // A renewed token must not re-fetch the description and flash the page.
   const apiRef = useRef(api);
@@ -28,7 +33,12 @@ export function PodDetail() {
     let cancelled = false;
     apiRef.current
       .podContainers(namespace, pod)
-      .then((d) => !cancelled && setAppLabel(d.app || ""))
+      .then((d) => {
+        if (cancelled) return;
+        setAppLabel(d.app || "");
+        setContainers(d.containers ?? []);
+        setMayExec(!!d.mayExec);
+      })
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -79,6 +89,14 @@ export function PodDetail() {
         >
           Metrics
         </button>
+        {mayExec && (
+          <button
+            className={"tab" + (tab === "terminal" ? " active" : "")}
+            onClick={() => setTab("terminal")}
+          >
+            Terminal
+          </button>
+        )}
       </div>
 
       {/* Describe and Metrics show the banner here; the log viewer has its own. */}
@@ -100,6 +118,11 @@ export function PodDetail() {
         </>
       )}
       {tab === "logs" && <LogViewer namespace={namespace} pod={pod} appLabel={appLabel} />}
+      {tab === "terminal" && !gone && (
+        <Suspense fallback={<div className="muted">Loading…</div>}>
+          <PodTerminal namespace={namespace} pod={pod} containers={containers} />
+        </Suspense>
+      )}
       {tab === "metrics" && !gone && (
         <PodMetrics namespace={namespace} pod={pod} onGone={() => setGone(true)} />
       )}

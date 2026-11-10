@@ -12,6 +12,8 @@
     "@codemirror/lang-yaml": "^6.1.0",
     "@replit/codemirror-indentation-markers": "^6.5.0",
     "@uiw/react-codemirror": "^4.23.6",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "oidc-client-ts": "^3.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
