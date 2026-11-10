@@ -54,6 +54,13 @@ type Ticket struct {
 	// pod may be gone by the time the build finishes.
 	Namespace string `json:"ns,omitempty"`
 	Pod       string `json:"pod,omitempty"`
+	// For a shell: who asked, which container, and when their sign-in ends.
+	// The browser cannot send a bearer token when it opens a WebSocket, so the
+	// ticket carries the identity the request that issued it established.
+	User      string `json:"usr,omitempty"`
+	Container string `json:"ctr,omitempty"`
+	Shell     string `json:"sh,omitempty"`
+	Until     int64  `json:"until,omitempty"`
 }
 
 type ticketClaims struct {

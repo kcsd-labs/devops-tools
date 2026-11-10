@@ -34,6 +34,7 @@ type Config struct {
 	Logs          LogsConfig          `yaml:"logs"`
 	Configs       ConfigsConfig       `yaml:"configurations"`
 	ImageRebuild  ImageRebuildConfig  `yaml:"imageRebuild"`
+	Exec          ExecConfig          `yaml:"exec"`
 
 	// RBAC seeds the access model on the very first start. One file rather than
 	// two: the roles it describes are configuration like everything else here,
@@ -390,6 +391,18 @@ func (c StorageConfig) SecretNameOr(fallback string) string {
 	return c.SecretName
 }
 
+// ExecConfig bounds a shell session in a pod. Who may open one is decided by
+// the pod-exec permission; this only says for how long.
+type ExecConfig struct {
+	// IdleTimeout closes a session nobody has typed in for this long.
+	IdleTimeout time.Duration `yaml:"idleTimeout"`
+	// MaxDuration closes a session this long after it opened, typing or not.
+	MaxDuration time.Duration `yaml:"maxDuration"`
+	// MaxSessionsPerUser caps the shells one person holds open at once, per
+	// replica.
+	MaxSessionsPerUser int `yaml:"maxSessionsPerUser"`
+}
+
 // ClusterConfig selects how to reach the Kubernetes API.
 type ClusterConfig struct {
 	// InCluster uses the pod's ServiceAccount (the normal deployment mode).
@@ -584,6 +597,15 @@ func applyDefaults(c *Config) {
 	}
 	if c.Auth.Session.TTL == 0 {
 		c.Auth.Session.TTL = 8 * time.Hour
+	}
+	if c.Exec.IdleTimeout == 0 {
+		c.Exec.IdleTimeout = 15 * time.Minute
+	}
+	if c.Exec.MaxDuration == 0 {
+		c.Exec.MaxDuration = time.Hour
+	}
+	if c.Exec.MaxSessionsPerUser == 0 {
+		c.Exec.MaxSessionsPerUser = 2
 	}
 	if c.Auth.LDAP.UserFilter == "" {
 		c.Auth.LDAP.UserFilter = "(uid=%s)"

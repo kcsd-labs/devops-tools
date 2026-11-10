@@ -40,6 +40,10 @@ type Entry struct {
 	// changes: this line goes into the logs and to everyone with audit-read,
 	// and a value written here is a value published.
 	Detail string
+	// Session and Seq place an entry in a shell session: which one, and which
+	// line of it. Empty for everything else.
+	Session string
+	Seq     int
 }
 
 // Recorder writes actions to the log and the metrics registry.
@@ -52,10 +56,15 @@ func (r *Recorder) Log(e Entry) {
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
 	}
-	slog.Info(actionMsg,
+	args := []any{
 		"user", e.User, "environment", e.Environment, "namespace", e.Namespace,
 		"operation", e.Operation, "target", e.Target,
-		"allowed", e.Allowed, "success", e.Success, "error", e.Error, "detail", e.Detail)
+		"allowed", e.Allowed, "success", e.Success, "error", e.Error, "detail", e.Detail,
+	}
+	if e.Session != "" {
+		args = append(args, "session", e.Session, "seq", e.Seq)
+	}
+	slog.Info(actionMsg, args...)
 
 	operationsTotal.WithLabelValues(
 		e.Environment, e.Namespace, e.Operation,
@@ -85,7 +94,9 @@ func Parse(line []byte) (Entry, bool) {
 		Success     bool      `json:"success"`
 		Error       string    `json:"error"`
 		// Absent from lines written before it existed, which read as empty.
-		Detail string `json:"detail"`
+		Detail  string `json:"detail"`
+		Session string `json:"session"`
+		Seq     int    `json:"seq"`
 	}
 	if err := json.Unmarshal(line, &raw); err != nil || raw.Msg != actionMsg {
 		return Entry{}, false
@@ -94,5 +105,6 @@ func Parse(line []byte) (Entry, bool) {
 		Time: raw.Time, User: raw.User, Environment: raw.Environment,
 		Namespace: raw.Namespace, Operation: raw.Operation, Target: raw.Target,
 		Allowed: raw.Allowed, Success: raw.Success, Error: raw.Error, Detail: raw.Detail,
+		Session: raw.Session, Seq: raw.Seq,
 	}, true
 }

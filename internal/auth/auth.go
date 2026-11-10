@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"devops-tools/internal/config"
@@ -279,6 +280,25 @@ func (s *Service) rolesFor(username string) []string {
 		}
 	}
 	return roles
+}
+
+// CurrentRoles is what the user may do as of now — read again, not taken from
+// a token, so that a long-lived connection can notice a role being revoked.
+func (s *Service) CurrentRoles(username string) []string { return s.rolesFor(username) }
+
+// TokenExpiry is when the bearer token on r stops being accepted, or the zero
+// time if it says nothing. Read without checking the signature: call it only
+// behind Middleware, which already has.
+func TokenExpiry(r *http.Request) time.Time {
+	raw := bearerToken(r)
+	if raw == "" {
+		return time.Time{}
+	}
+	var claims jwt.RegisteredClaims
+	if _, _, err := jwt.NewParser().ParseUnverified(raw, &claims); err != nil || claims.ExpiresAt == nil {
+		return time.Time{}
+	}
+	return claims.ExpiresAt.Time
 }
 
 // Middleware extracts and verifies the bearer token, then stores the user in

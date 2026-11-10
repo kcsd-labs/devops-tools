@@ -50,7 +50,12 @@ func (s *Server) handlePodContainers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app, _ := s.kube.PodAppLabel(r.Context(), user.Username, namespace, pod)
-	writeJSON(w, http.StatusOK, map[string]any{"containers": names, "app": app})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"containers": names, "app": app,
+		// Whether to offer a Terminal tab. The server decides again when one is
+		// opened; this only spares a tab that would answer "forbidden".
+		"mayExec": s.authz.Allowed(user.Roles, namespace, OpPodExec),
+	})
 }
 
 // handleWorkloadPods lists the running pods of a service, newest first. Used to

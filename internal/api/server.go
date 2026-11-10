@@ -36,6 +36,7 @@ const (
 	OpDescribe            = config.OpDescribe
 	OpMetrics             = config.OpMetrics
 	OpPodRestart          = config.OpPodRestart
+	OpPodExec             = config.OpPodExec
 	OpServiceList         = config.OpServiceList
 	OpServiceRequest      = config.OpServiceRequest
 	OpServiceRequestWrite = config.OpServiceRequestWrite
@@ -87,6 +88,10 @@ type Server struct {
 	// self is how this service finds its own pods, for the one number on the
 	// storage screen that is not the store's to answer.
 	self kube.PodIdentity
+	// shells counts the open shell sessions per person.
+	shells shellLimits
+	// openShell runs the shell; the cluster's own, but for tests.
+	openShell shellOpener
 }
 
 func NewServer(
@@ -158,6 +163,10 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/auth/info", s.handleAuthInfo)
 	r.Post("/api/login", s.handleLogin)
 
+	// A shell, opened with the ticket a signed-in request was given: a browser
+	// cannot put a bearer token on a WebSocket. Authenticated by the ticket.
+	r.Get("/api/exec", s.handleExecSession)
+
 	r.Route("/api", func(r chi.Router) {
 		r.Use(s.auth.Middleware)
 
@@ -224,6 +233,7 @@ func (s *Server) Router() http.Handler {
 		r.Get(base+"/pods/{pod}/events", s.requireOp(OpDescribe, s.handlePodEvents))
 		r.Get(base+"/pods/{pod}/metrics", s.requireOp(OpMetrics, s.handlePodMetrics))
 		r.Post(base+"/pods/{pod}/restart", s.requireOp(OpPodRestart, s.handleRestartPod))
+		r.Post(base+"/pods/{pod}/exec", s.requireOp(OpPodExec, s.handleExecTicket))
 
 		// Rebuilding an image a registry retention policy removed. Everything
 		// after the first call carries a ticket the server signed, so the

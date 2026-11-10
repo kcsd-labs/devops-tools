@@ -29,6 +29,10 @@ configurations:
     project: ""
     url: ""
 environment: production
+exec:
+  idleTimeout: 15m
+  maxDuration: 1h
+  maxSessionsPerUser: 2
 impersonation:
   defaultGroup: devops-tools-users
   enabled: false

@@ -308,6 +308,16 @@ export interface SecretSummary {
 }
 
 /** A ConfigMap as the list shows it. */
+/** What opening a shell needs: the ticket for the WebSocket, and its limits. */
+export interface ExecTicket {
+  ticket: string;
+  container: string;
+  shell: string;
+  idleSeconds: number;
+  /** When the session ends at the latest, in epoch milliseconds. */
+  until: number;
+}
+
 export interface ConfigMapSummary {
   name: string;
   keys: number;
@@ -605,7 +615,10 @@ export function createApi(token: string | undefined) {
     pods: (ns: string) =>
       getJSON<{ pods: PodSummary[]; canRebuildImage: boolean }>(`/namespaces/${ns}/pods`),
     podContainers: (ns: string, pod: string) =>
-      getJSON<{ containers: string[]; app: string }>(`/namespaces/${ns}/pods/${pod}/containers`),
+      getJSON<{ containers: string[]; app: string; mayExec?: boolean }>(`/namespaces/${ns}/pods/${pod}/containers`),
+    /** A ticket to open a shell in a container, and how long the session may last. */
+    execTicket: (ns: string, pod: string, container: string) =>
+      sendJSONFor<ExecTicket>("POST", `/namespaces/${ns}/pods/${pod}/exec`, { container }),
     workloadPods: (ns: string, app: string) =>
       getJSON<string[]>(`/namespaces/${ns}/workload-pods?app=${encodeURIComponent(app)}`),
     podEvents: (ns: string, pod: string) =>

@@ -212,6 +212,14 @@ logs:
   archiveNote: "" # e.g. "Older events are kept in the SIEM."
   archiveURL: ""
 
+# A shell in a pod, for roles granted pod-exec by name — "*" does not grant it.
+# Never opened in cluster.hiddenNamespaces or this service's own namespace.
+# Every line typed is written to the audit trail before it reaches the shell.
+exec:
+  idleTimeout: 15m # closed when nothing has been typed for this long
+  maxDuration: 1h # closed this long after it opened
+  maxSessionsPerUser: 2 # per replica
+
 # --- Access model -----------------------------------------------------------
 # Seeds an empty store on the very first start, and is then left alone: roles
 # are edited in the portal, under Access management, and kept on the volume.
