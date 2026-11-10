@@ -64,6 +64,50 @@ function linked(detail: string) {
   );
 }
 
+/** One row of the table: an action, or a whole shell session. */
+type Row =
+  | { kind: "entry"; e: AuditEntry }
+  | { kind: "session"; id: string; first: AuditEntry; entries: AuditEntry[] };
+
+/** Gathers each shell session's records into one row, placed where its first
+    record falls. A session that runs past the loaded page shows what has been
+    loaded of it; "Earlier" brings the rest into the same row. */
+function rowsOf(list: AuditEntry[]): Row[] {
+  const rows: Row[] = [];
+  const sessions = new Map<string, Extract<Row, { kind: "session" }>>();
+  for (const e of list) {
+    if (!e.session) {
+      rows.push({ kind: "entry", e });
+      continue;
+    }
+    let r = sessions.get(e.session);
+    if (!r) {
+      r = { kind: "session", id: e.session, first: e, entries: [] };
+      sessions.set(e.session, r);
+      rows.push(r);
+    }
+    r.entries.push(e);
+  }
+  for (const r of sessions.values()) {
+    r.entries.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0) || new Date(a.time).getTime() - new Date(b.time).getTime());
+  }
+  return rows;
+}
+
+/** One line of a session as it reads in the record. */
+function sessionLine(e: AuditEntry): string {
+  switch (e.operation) {
+    case "pod-exec":
+      return `opened — ${e.detail}`;
+    case "pod-exec-end":
+      return `closed — ${e.detail}`;
+    case "pod-exec-key":
+      return e.detail;
+    default:
+      return e.success ? `$ ${e.detail}` : `$ ${e.detail}   ← not sent: ${e.error}`;
+  }
+}
+
 export function Audit() {
   const api = useApi();
   const apiRef = useRef(api);
@@ -226,7 +270,46 @@ export function Audit() {
             </tr>
           </thead>
           <tbody>
-            {shown.map((e, i) => {
+            {rowsOf(shown).map((row, i) => {
+              if (row.kind === "session") {
+                const id = "session-" + row.id;
+                const commands = row.entries.filter((x) => x.operation === "pod-exec-command").length;
+                const end = row.entries.find((x) => x.operation === "pod-exec-end");
+                // Shown at its opening, whichever order the table is in.
+                const s = row.entries[0] ?? row.first;
+                return (
+                  <Fragment key={id}>
+                    <tr className="tr-btn" onClick={() => setOpen(open === id ? "" : id)} title="Show every line">
+                      <td className="muted">{when(s.time)}</td>
+                      <td>{s.user || "—"}</td>
+                      <td>shell session</td>
+                      <td>{s.namespace}</td>
+                      <td>{s.target}</td>
+                      <td>
+                        <span className={"badge " + (end ? "badge-ok" : "badge-warn")}>
+                          {commands} {commands === 1 ? "line" : "lines"}
+                          {end ? "" : " · open"}
+                        </span>
+                      </td>
+                    </tr>
+                    {open === id && (
+                      <tr>
+                        <td colSpan={6}>
+                          <div className="console">
+                            {row.entries.map((x, j) => (
+                              <div key={j}>
+                                <span className="muted">{new Date(x.time).toLocaleTimeString()} </span>
+                                {sessionLine(x)}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              }
+              const e = row.e;
               const id = `${e.time}-${i}`;
               // Refused and failed are different things: one is the access
               // model saying no, the other is the cluster.

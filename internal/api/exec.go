@@ -250,7 +250,8 @@ type shellSession struct {
 	sizes   chan remotecommand.TerminalSize
 
 	writeMu sync.Mutex
-	seq     int
+	seq     int // every input, lines and keys
+	lines   int
 }
 
 func (x *shellSession) entry(op, detail string) audit.Entry {
@@ -395,6 +396,7 @@ loop:
 			case "line":
 				idle.Reset(cfg.IdleTimeout)
 				x.seq++
+				x.lines++
 				if err := shell.CheckLine(m.Text); err != nil {
 					e := x.entry(opExecCommand, shell.Mask(m.Text))
 					e.Success, e.Error = false, err.Error()
@@ -444,7 +446,7 @@ loop:
 	why := reason
 	reasonMu.Unlock()
 	x.s.audit.Log(x.entry(opExecEnd, fmt.Sprintf("%s after %s, %d lines",
-		why, time.Since(x.started).Round(time.Second), x.seq)))
+		why, time.Since(x.started).Round(time.Second), x.lines)))
 	x.status(map[string]any{"type": "closed", "reason": why})
 	x.writeMu.Lock()
 	_ = x.conn.WriteControl(websocket.CloseMessage,

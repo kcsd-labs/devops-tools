@@ -84,6 +84,9 @@ export interface AuditEntry {
   /** What the action changed — which keys, which settings, the commit — never
       what they were changed to. Empty on records written before it existed. */
   detail: string;
+  /** The shell session an entry belongs to, and its place in it. */
+  session?: string;
+  seq?: number;
 }
 
 export interface AuditPage {

@@ -200,28 +200,49 @@ func TestEachLineIsRecordedBeforeTheShellGetsIt(t *testing.T) {
 	}
 
 	got := ev.snapshot()
-	want := []string{
-		"trail pod-exec shell /bin/sh",
-		"trail pod-exec-command ls -la",
-		"shell ls -la",
-		"trail pod-exec-command(refused) ls\t",
-		"trail pod-exec-command PGPASSWORD=*** psql",
-		"shell PGPASSWORD=hunter2 psql",
-		"trail pod-exec-key ^C",
-		"shell ^C",
-		"trail pod-exec-key ^D",
-		"shell ^D",
+	at := func(s string) int {
+		for i, e := range got {
+			if e == s {
+				return i
+			}
+		}
+		return -1
 	}
-	if len(got) < len(want)+1 {
-		t.Fatalf("timeline too short:\n%s", strings.Join(got, "\n"))
-	}
-	for i, w := range want {
-		if got[i] != w {
-			t.Fatalf("timeline[%d] = %q, want %q\nwhole timeline:\n%s", i, got[i], w, strings.Join(got, "\n"))
+	whole := "\nwhole timeline:\n" + strings.Join(got, "\n")
+
+	// Each record comes before the shell has what it records. When the shell
+	// reads a line relative to the next record is the shell's business, so
+	// only these pairs are fixed.
+	for _, pair := range [][2]string{
+		{"trail pod-exec shell /bin/sh", "trail pod-exec-command ls -la"},
+		{"trail pod-exec-command ls -la", "shell ls -la"},
+		{"trail pod-exec-command PGPASSWORD=*** psql", "shell PGPASSWORD=hunter2 psql"},
+		{"trail pod-exec-key ^C", "shell ^C"},
+		{"trail pod-exec-key ^D", "shell ^D"},
+	} {
+		first, then := at(pair[0]), at(pair[1])
+		if first < 0 || then < 0 || first > then {
+			t.Errorf("want %q before %q%s", pair[0], pair[1], whole)
 		}
 	}
-	if end := got[len(want)]; !strings.HasPrefix(end, "trail pod-exec-end the shell exited after") {
-		t.Errorf("end record = %q", end)
+	// Refused: on record, and never in the shell.
+	if at("trail pod-exec-command(refused) ls\t") < 0 {
+		t.Errorf("the refused line is not on record%s", whole)
+	}
+	for _, e := range got {
+		if strings.HasPrefix(e, "shell ls\t") {
+			t.Errorf("a refused line reached the shell%s", whole)
+		}
+	}
+	// The password reaches the shell, not the trail.
+	for _, e := range got {
+		if strings.HasPrefix(e, "trail") && strings.Contains(e, "hunter2") {
+			t.Errorf("the trail holds the password: %q", e)
+		}
+	}
+	if last := got[len(got)-1]; !strings.HasPrefix(last, "trail pod-exec-end the shell exited after") ||
+		!strings.HasSuffix(last, ", 3 lines") {
+		t.Errorf("end record = %q%s", last, whole)
 	}
 }
 

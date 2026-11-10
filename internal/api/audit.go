@@ -94,6 +94,8 @@ func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 			"success":   e.Success,
 			"error":     e.Error,
 			"detail":    e.Detail,
+			"session":   e.Session,
+			"seq":       e.Seq,
 		})
 	}
 
