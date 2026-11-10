@@ -256,9 +256,23 @@ function RoleDialog({
   const api = useApi();
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
+  // The operations "everything" stands for, and the ones it leaves out.
+  const available = (group: string[]) => group.filter((o) => operations.includes(o));
+  const nsOps = available(sections.namespace).filter((o) => !sections.explicit.includes(o));
+  const explicitOps = available(sections.explicit);
+
+  // "Everything" never shows beside an operation it leaves out. A grant stored
+  // as both opens as the list it amounts to, so pod-exec is never folded away
+  // out of sight.
   const [grants, setGrants] = useState<NamespaceGrant[]>(
     role?.namespaces?.length
-      ? role.namespaces.map((g) => ({ namespace: g.namespace, operations: g.operations ?? [] }))
+      ? role.namespaces.map((g) => {
+          const ops = g.operations ?? [];
+          if (ops.includes("*") && ops.some((o) => explicitOps.includes(o))) {
+            return { namespace: g.namespace, operations: [...nsOps, ...ops.filter((o) => o !== "*")] };
+          }
+          return { namespace: g.namespace, operations: ops };
+        })
       : [{ namespace: "", operations: [] }]
   );
   const [global, setGlobal] = useState<string[]>(role?.global ?? []);
@@ -269,11 +283,6 @@ function RoleDialog({
   const [error, setError] = useState("");
 
   // Each section shows what the deployment offers and the server places there.
-  const available = (group: string[]) => group.filter((o) => operations.includes(o));
-  const nsOps = available(sections.namespace).filter((o) => !sections.explicit.includes(o));
-  // Granted only by name: "everything" leaves them out, so they are offered
-  // beside it rather than inside the list it hides.
-  const explicitOps = available(sections.explicit);
   const configOps = available(sections.config);
   const globalOps = available(sections.global);
 
@@ -409,14 +418,10 @@ function RoleDialog({
                   <input
                     type="checkbox"
                     checked={g.operations.includes("*")}
-                    onChange={(e) =>
-                      setGrant(i, {
-                        operations: [
-                          ...(e.target.checked ? ["*"] : []),
-                          ...g.operations.filter((o) => explicitOps.includes(o)),
-                        ],
-                      })
-                    }
+                    // Unticked, the list opens with all of it ticked: what
+                    // "everything" granted stays granted, and adding pod-exec
+                    // is one more tick rather than twenty-seven.
+                    onChange={(e) => setGrant(i, { operations: e.target.checked ? ["*"] : [...nsOps] })}
                   />
                   <span>everything</span>
                 </label>
@@ -429,12 +434,12 @@ function RoleDialog({
                 </button>
               </div>
 
-              {/* One list for every operation. Under "everything" the list it
-                  covers folds away, and only what it does not cover is left to
-                  tick. */}
-              <div className="op-grid">
-                {!g.operations.includes("*") &&
-                  nsOps.map((op) => (
+              {/* One list for every operation, folded away under "everything".
+                  pod-exec is in it and nowhere else: to grant it, untick
+                  "everything" and tick it here. */}
+              {!g.operations.includes("*") && (
+                <div className="op-grid">
+                  {nsOps.map((op) => (
                     <label key={op} className="check">
                       <input
                         type="checkbox"
@@ -444,23 +449,24 @@ function RoleDialog({
                       <span>{op}</span>
                     </label>
                   ))}
-                {explicitOps.map((op) => (
-                  <label
-                    key={op}
-                    className="check op-explicit"
-                    title={`${EXPLICIT_OP_LABELS[op] ?? op}. Not included in everything: granted only when ticked.`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={g.operations.includes(op)}
-                      onChange={() => toggleOp(i, op)}
-                    />
-                    <span>
-                      {op} <span className="muted">· not in everything</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
+                  {explicitOps.map((op) => (
+                    <label
+                      key={op}
+                      className="check op-explicit"
+                      title={`${EXPLICIT_OP_LABELS[op] ?? op}. Not included in everything: granted only when ticked.`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={g.operations.includes(op)}
+                        onChange={() => toggleOp(i, op)}
+                      />
+                      <span>
+                        {op} <span className="muted">· not in everything</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 
