@@ -3,6 +3,18 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.27.0
+
+- INFR-1930 — ConfigMaps beside Secrets: view and edit as YAML or key by key,
+  see which workloads read each one and restart them after a change.
+- New permissions per namespace: `configmap-list`, `configmap-create`,
+  `configmap-update`, `configmap-delete`. Roles granted `"*"` have them.
+- `"*"` no longer reaches system namespaces (`kube-*`, `default`); system
+  Secrets and ConfigMaps are read-only.
+- Transfer keeps a secret's type.
+- Upgrade Go to 1.26.10 and fix a vulnerability in certificate verification
+  (GO-2026-6809).
+
 ## 0.26.0
 
 - INFR-1931 — a Services page: where each service in a namespace answers
