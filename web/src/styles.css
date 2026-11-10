@@ -2655,6 +2655,11 @@ a.seg-btn {
 .term-host .xterm-viewport {
   height: 100%;
 }
+/* xterm paints its viewport black whatever the theme says, and the pixels left
+   under the last whole row showed as a black bar. */
+.term-host .xterm-viewport {
+  background-color: #0b1020 !important;
+}
 .term-host .xterm-viewport::-webkit-scrollbar {
   width: 8px;
 }
