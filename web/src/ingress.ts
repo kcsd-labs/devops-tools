@@ -34,7 +34,7 @@ export function worst(problems: IngressProblem[]): IngressProblem | undefined {
 
 /** One line saying what a check found, for the line above Save. */
 export function checkSummary(routes: IngressRoute[]): { ok: boolean; text: string } {
-  const problems = routes.flatMap((r) => r.problems);
+  const problems = routes.flatMap((r) => r.problems ?? []);
   if (problems.length > 0) {
     const seen = new Set<string>();
     const texts = problems.map((p) => p.text).filter((t) => !seen.has(t) && seen.add(t));

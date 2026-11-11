@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"math/big"
@@ -239,5 +240,19 @@ func TestWhatTheControllerServesIsNotAProblem(t *testing.T) {
 	p := w.routes(ing)[0].Problems
 	if len(p) != 1 || p[0].Level != "warn" || !strings.Contains(p[0].Text, "default certificate") {
 		t.Errorf("a missing secret: %+v", p)
+	}
+}
+
+// A route with nothing wrong is sent with an empty list of problems, not null:
+// the page counts them, and null took the whole page down.
+func TestARouteWithoutProblemsSendsAnEmptyList(t *testing.T) {
+	w, cs := ingressWorldFor(t)
+	ing, _ := cs.NetworkingV1().Ingresses("abs-dev").Get(context.Background(), "abs-api", metav1.GetOptions{})
+	b, err := json.Marshal(w.routes(ing))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"problems":[]`) {
+		t.Errorf("routes: %s", b)
 	}
 }

@@ -344,8 +344,10 @@ func (w *ingressWorld) routes(ing *networkingv1.Ingress) []IngressRoute {
 
 	var out []IngressRoute
 	add := func(host, path string, be *networkingv1.IngressServiceBackend) {
+		// Problems starts empty, not nil: a route with none is sent as [],
+		// which the page counts, rather than null, which it cannot.
 		r := IngressRoute{Ingress: ing.Name, Host: host, Path: path, Class: class,
-			Release: ing.Annotations["meta.helm.sh/release-name"]}
+			Release: ing.Annotations["meta.helm.sh/release-name"], Problems: []IngressProblem{}}
 		if r.Path == "" {
 			r.Path = "/"
 		}

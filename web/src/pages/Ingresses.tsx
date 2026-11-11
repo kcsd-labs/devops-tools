@@ -69,7 +69,8 @@ export function Ingresses() {
     setError("");
     apiRef.current
       .ingresses(namespace)
-      .then(setData)
+      // A route with no list of problems is one with none.
+      .then((d) => setData({ ...d, routes: (d.routes ?? []).map((r) => ({ ...r, problems: r.problems ?? [] })) }))
       .catch((e) => {
         setData(null);
         setError(e.message);
