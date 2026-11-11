@@ -3,6 +3,17 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.28.0
+
+- INFR-2028 — a terminal on the pod page: bash, or sh where there is no bash.
+  Every command is written to the audit trail and Loki before it runs.
+  Needs `pod-exec` (roles granted `"*"` have it). Not available in system
+  namespaces or privileged pods.
+- INFR-1932 — Ingresses on the Services page: create and edit them, see what
+  stops an address from working, and fix it in one click.
+- New permissions per namespace: `ingress-list`, `ingress-create`,
+  `ingress-update`, `ingress-delete`. Roles granted `"*"` have them.
+
 ## 0.27.0
 
 - INFR-1930 — ConfigMaps beside Secrets: view and edit as YAML or key by key,
