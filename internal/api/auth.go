@@ -106,6 +106,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			// The Services page is in the menu for someone who holds
 			// service-list in at least one namespace.
 			"services": len(s.authz.NamespacesForOp(user.Roles, OpServiceList)) > 0,
+			// Its Ingress tab, for someone who holds ingress-list somewhere.
+			"ingresses": len(s.authz.NamespacesForOp(user.Roles, OpIngressList)) > 0,
 			// The storage screen: visible with the users list, but the buttons
 			// on it need the stronger grant — see the handlers.
 			"accessRestore": s.authz.AllowedGlobal(user.Roles, OpAccessRestore),

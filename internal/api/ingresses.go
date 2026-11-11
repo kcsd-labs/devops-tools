@@ -49,6 +49,7 @@ func (s *Server) handleListIngresses(w http.ResponseWriter, r *http.Request) {
 		"routes":         list.Routes,
 		"annotationKeys": list.AnnotationKeys,
 		"classes":        list.Classes,
+		"certificates":   list.Certificates,
 		"mayCreate":      s.authz.Allowed(user.Roles, namespace, OpIngressCreate),
 		"mayUpdate":      s.authz.Allowed(user.Roles, namespace, OpIngressUpdate),
 		"mayDelete":      s.authz.Allowed(user.Roles, namespace, OpIngressDelete),

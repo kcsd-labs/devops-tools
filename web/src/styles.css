@@ -2694,3 +2694,148 @@ a.seg-btn {
 .term-help {
   font-size: 12px;
 }
+
+/* --- ingress ---------------------------------------------------------------
+   The list says what is in the way of each address and offers the fix beside
+   it; the editor and the expose dialog check as they are filled in. */
+.ing-host {
+  font-size: 13px;
+  text-align: left;
+}
+.ing-open {
+  margin-left: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.ing-open:hover {
+  color: var(--accent);
+}
+.ing-sub {
+  font-size: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ing-ready {
+  font-size: 12px;
+}
+.ing-problem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ing-state {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  white-space: normal;
+}
+.ing-state.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.ing-state.warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.ing-state.error {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+}
+.modal.ing-expose {
+  width: min(560px, 96vw);
+}
+.modal.ing-editor {
+  width: min(860px, 96vw);
+}
+.ing-addr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  gap: 8px;
+}
+.ing-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.ing-check {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 9px;
+}
+.ing-check.ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.ing-check.warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.ing-more {
+  margin-top: 10px;
+}
+.ing-more-body {
+  margin-top: 8px;
+}
+.ing-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 14px;
+}
+.ing-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr) auto minmax(0, 1.1fr) 90px 28px;
+  gap: 8px;
+  align-items: center;
+}
+.ing-port {
+  width: 100%;
+}
+.ing-tls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+}
+.ing-tls-hosts {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ing-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+.ing-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: start;
+}
+.ing-setting-label {
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.ing-yaml {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.svc-outside a {
+  text-decoration: none;
+}
+@media (max-width: 760px) {
+  .ing-rule {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ing-two,
+  .ing-addr {
+    grid-template-columns: 1fr;
+  }
+}

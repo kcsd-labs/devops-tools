@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useApi } from "../useApi";
 import type { ServiceInfo, ServiceList, ServicePort } from "../api";
+import { ExposeDialog } from "../components/ExposeDialog";
 
 const FULL_NAMES_KEY = "devops-tools.servicesFullNames";
 const NAMESPACE_KEY = "devops-tools.servicesNamespace";
@@ -142,6 +143,9 @@ export function Services() {
     }
   });
   const [copied, setCopied] = useState("");
+  const [exposing, setExposing] = useState("");
+  const [reload, setReload] = useState(0);
+  const [notice, setNotice] = useState("");
   const timer = useRef<number>();
 
   // The namespace is in the address, so a link to a namespace's services can
@@ -184,7 +188,7 @@ export function Services() {
     return () => {
       live = false;
     };
-  }, [api, namespace]);
+  }, [api, namespace, reload]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -231,10 +235,17 @@ export function Services() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Services</h1>
-          <div className="muted svc-sub">
-            How to reach each service from another pod
-            {data && !loading && ` · ${plural(data.services.length, "service")}`}
-          </div>
+          {data?.mayIngress ? (
+            <div className="seg-switch" role="tablist">
+              <span className="on">Services</span>
+              <Link to={`/ingresses${namespace ? "?namespace=" + encodeURIComponent(namespace) : ""}`}>Ingress</Link>
+            </div>
+          ) : (
+            <div className="muted svc-sub">
+              How to reach each service from another pod
+              {data && !loading && ` · ${plural(data.services.length, "service")}`}
+            </div>
+          )}
         </div>
       </div>
 
@@ -285,6 +296,11 @@ export function Services() {
       </div>
 
       {error && <div className="alert">{error}</div>}
+      {notice && (
+        <div className="cm-saved" onClick={() => setNotice("")}>
+          ✓ {notice}
+        </div>
+      )}
 
       {(!namespaces || loading) && !error && <div className="muted">Loading…</div>}
 
@@ -375,6 +391,20 @@ export function Services() {
                             are likely to reach nothing.
                           </div>
                         ))}
+                      {(s.outside ?? []).map((url) => (
+                        <div className="svc-addr svc-outside" key={url}>
+                          <a className="mono link" href={url} target="_blank" rel="noreferrer" title="Open in a new tab">
+                            🌐 {url.replace(/^https?:\/\//, "")}
+                          </a>
+                          <button
+                            className={"svc-copy" + (copied === url ? " done" : "")}
+                            onClick={() => copy(url)}
+                            title={"Copy " + url}
+                          >
+                            {copied === url ? "✓ copied" : "copy"}
+                          </button>
+                        </div>
+                      ))}
                       {n && (
                         <div className={"svc-note" + (n.warn ? " warn" : "")}>
                           {n.text}{" "}
@@ -434,6 +464,15 @@ export function Services() {
                             Requests ›
                           </Link>
                         )}
+                        {data.mayExpose && !external && !s.headless && (s.outside?.length ?? 0) === 0 && (
+                          <button
+                            className="btn ghost sm svc-act"
+                            onClick={() => setExposing(s.name)}
+                            title="Open it to the outside through an ingress"
+                          >
+                            Expose…
+                          </button>
+                        )}
                         {data.mayLogs && (s.pods?.length ?? 0) > 0 && (
                           <Link
                             className="btn ghost sm svc-act"
@@ -451,6 +490,19 @@ export function Services() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {exposing && (
+        <ExposeDialog
+          namespace={namespace}
+          service={exposing}
+          onClose={() => setExposing("")}
+          onCreated={(name, detail) => {
+            setExposing("");
+            setNotice(detail || `${name} created`);
+            setReload((n) => n + 1);
+          }}
+        />
       )}
     </div>
   );

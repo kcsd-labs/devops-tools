@@ -39,6 +39,8 @@ export interface Capabilities {
   audit: boolean;
   /** The caller holds service-list in at least one namespace. */
   services: boolean;
+  /** The caller holds ingress-list in at least one namespace. */
+  ingresses?: boolean;
   /** May take a snapshot of the access model, and put one back. */
   accessRestore: boolean;
 }
@@ -200,6 +202,8 @@ export interface ServicePort {
 export interface ServiceInfo {
   name: string;
   namespace: string;
+  /** The addresses ingresses give it from outside, as URLs. */
+  outside?: string[];
   /** ClusterIP, NodePort, LoadBalancer or ExternalName. */
   type: string;
   headless: boolean;
@@ -226,6 +230,9 @@ export interface ServiceList {
   mayLogs: boolean;
   mayHelm: boolean;
   mayRequest: boolean;
+  /** May create an ingress here, and may see the ingresses. */
+  mayExpose?: boolean;
+  mayIngress?: boolean;
 }
 
 export interface Header {
@@ -319,6 +326,87 @@ export interface ExecTicket {
   idleSeconds: number;
   /** When the session ends at the latest, in epoch milliseconds. */
   until: number;
+}
+
+/** What to do about a problem: use a port or a certificate, or go and look. */
+export interface IngressFix {
+  kind: "port" | "tls" | "pods" | "ingress";
+  value?: string;
+  namespace?: string;
+  name?: string;
+}
+
+export interface IngressProblem {
+  level: "warn" | "error";
+  text: string;
+  fix?: IngressFix;
+}
+
+/** One host and path an ingress answers. */
+export interface IngressRoute {
+  ingress: string;
+  /** Empty for the default backend: any host. */
+  host: string;
+  path: string;
+  service: string;
+  port: string;
+  ready?: { ready: number; total: number };
+  tlsSecret?: string;
+  tlsDays?: number;
+  class?: string;
+  release?: string;
+  problems: IngressProblem[];
+}
+
+export interface IngressCert {
+  secret: string;
+  names: string[];
+  days: number;
+}
+
+export interface IngressList {
+  routes: IngressRoute[];
+  annotationKeys: string[];
+  classes: string[];
+  certificates: IngressCert[];
+  mayCreate: boolean;
+  mayUpdate: boolean;
+  mayDelete: boolean;
+}
+
+export interface IngressRule {
+  host: string;
+  path: string;
+  pathType?: string;
+  service: string;
+  port: string;
+}
+
+export interface IngressForm {
+  class: string;
+  rules: IngressRule[];
+  tls: { secret: string; hosts: string[] }[];
+  annotations: Record<string, string>;
+}
+
+export interface IngressDoc extends IngressForm {
+  name: string;
+  version: string;
+  release?: string;
+  yaml: string;
+  defaultBackend?: string;
+  routes: IngressRoute[];
+}
+
+export interface IngressSuggestion {
+  name: string;
+  host: string;
+  path: string;
+  port: string;
+  ports: string[];
+  class: string;
+  tls?: string;
+  secrets: string[];
 }
 
 export interface ConfigMapSummary {
@@ -716,6 +804,25 @@ export function createApi(token: string | undefined) {
     updateSecret: (ns: string, name: string, data: Record<string, string>) =>
       sendJSON("PUT", `/namespaces/${ns}/secrets/${name}`, { data }),
     deleteSecret: (ns: string, name: string) => del(`/namespaces/${ns}/secrets/${name}`),
+
+    ingressNamespaces: () => getJSON<{ namespaces: string[] }>("/ingresses"),
+    ingresses: (ns: string) => getJSON<IngressList>(`/namespaces/${ns}/ingresses`),
+    ingress: (ns: string, name: string) =>
+      getJSON<IngressDoc>(`/namespaces/${ns}/ingresses/${encodeURIComponent(name)}`),
+    ingressSuggestion: (ns: string, service: string) =>
+      getJSON<IngressSuggestion>(`/namespaces/${ns}/ingress-suggestion?service=${encodeURIComponent(service)}`),
+    /** The list's checks, run on an ingress before it is saved. */
+    checkIngress: (ns: string, name: string, form: IngressForm) =>
+      sendJSONFor<{ routes: IngressRoute[] }>("POST", `/namespaces/${ns}/ingress-check`, { name, form }),
+    createIngress: (ns: string, name: string, form: IngressForm) =>
+      sendJSONFor<{ detail: string }>("POST", `/namespaces/${ns}/ingresses`, { name, form }),
+    updateIngress: (ns: string, name: string, version: string, change: { form: IngressForm } | { yaml: string }) =>
+      sendJSONFor<{ ingress: IngressDoc; detail: string }>(
+        "PUT",
+        `/namespaces/${ns}/ingresses/${encodeURIComponent(name)}`,
+        { version, ...change }
+      ),
+    deleteIngress: (ns: string, name: string) => del(`/namespaces/${ns}/ingresses/${encodeURIComponent(name)}`),
 
     configMaps: (ns: string) => getJSON<ConfigMapList>(`/namespaces/${ns}/configmaps`),
     configMap: (ns: string, name: string) =>

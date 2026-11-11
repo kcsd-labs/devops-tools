@@ -75,6 +75,15 @@ type IngressList struct {
 	// cluster: suggestions for the settings field, not a limit.
 	AnnotationKeys []string `json:"annotationKeys"`
 	Classes        []string `json:"classes"`
+	// Certificates are the namespace's TLS secrets that hold one.
+	Certificates []IngressCert `json:"certificates"`
+}
+
+// IngressCert is a TLS secret as the certificate picker shows it.
+type IngressCert struct {
+	Secret string   `json:"secret"`
+	Names  []string `json:"names"`
+	Days   int      `json:"days"`
 }
 
 // IngressRule is one host, path and backend, as the form edits it.
@@ -464,6 +473,17 @@ func (w *ingressWorld) annotationKeys() []string {
 	return sortedSet(seen)
 }
 
+func (w *ingressWorld) certificates() []IngressCert {
+	out := []IngressCert{}
+	for n, c := range w.certs {
+		if c != nil {
+			out = append(out, IngressCert{Secret: n, Names: c.names, Days: c.daysLeft(w.now)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Secret < out[j].Secret })
+	return out
+}
+
 func (w *ingressWorld) classList() []string {
 	set := map[string]bool{}
 	for c := range w.classes {
@@ -493,7 +513,8 @@ func (m *Manager) ListIngresses(ctx context.Context, asUser, namespace string) (
 	if err != nil {
 		return nil, err
 	}
-	out := &IngressList{Routes: []IngressRoute{}, AnnotationKeys: w.annotationKeys(), Classes: w.classList()}
+	out := &IngressList{Routes: []IngressRoute{}, AnnotationKeys: w.annotationKeys(), Classes: w.classList(),
+		Certificates: w.certificates()}
 	for i := range l.Items {
 		out.Routes = append(out.Routes, w.routes(&l.Items[i])...)
 	}

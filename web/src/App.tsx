@@ -26,6 +26,7 @@ const LOCAL_SIGNIN_PATH = "/signin/local";
 // management switched off entirely — they should not pay for it on every load.
 // Brings the same editor, and is loaded on demand for the same reason.
 const ConfigMaps = lazy(() => import("./pages/ConfigMaps").then((m) => ({ default: m.ConfigMaps })));
+const Ingresses = lazy(() => import("./pages/Ingresses").then((m) => ({ default: m.Ingresses })));
 
 const Configurations = lazy(() =>
   import("./pages/Configurations").then((m) => ({ default: m.Configurations }))
@@ -63,6 +64,14 @@ export default function App() {
           }
         />
         <Route path="/services" element={<Services />} />
+        <Route
+          path="/ingresses"
+          element={
+            <Suspense fallback={<div className="page muted">Loading…</div>}>
+              <Ingresses />
+            </Suspense>
+          }
+        />
         <Route path="/ns/:namespace/services/:name" element={<Requests />} />
         <Route
           path="/configurations"
