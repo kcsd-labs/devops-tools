@@ -48,6 +48,10 @@ type Service struct {
 	// the annotation and label Helm puts on everything it installs.
 	Release string `json:"release,omitempty"`
 	Chart   string `json:"chart,omitempty"`
+
+	// Outside lists the addresses ingresses in the namespace give the service
+	// from outside the cluster, as URLs.
+	Outside []string `json:"outside,omitempty"`
 }
 
 // ServicePort is one port a service answers on.
@@ -98,6 +102,7 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 	// and none of it is worth losing the list over.
 	counts, cerr := endpointCounts(ctx, cs, namespace)
 	workloads := workloadsIn(ctx, cs, namespace)
+	outside := outsideAddresses(ctx, cs, namespace)
 
 	out := make([]Service, 0, len(list.Items))
 	for _, s := range list.Items {
@@ -137,10 +142,49 @@ func listServices(ctx context.Context, cs kubernetes.Interface, namespace string
 			svc.Endpoints = &b.Endpoints
 			svc.Pods = b.pods
 		}
+		svc.Outside = outside[s.Name]
 		out = append(out, svc)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// outsideAddresses maps each service to the URLs ingresses give it. Read as the
+// person: someone who may not list ingresses simply sees none.
+func outsideAddresses(ctx context.Context, cs kubernetes.Interface, namespace string) map[string][]string {
+	l, err := cs.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, ing := range l.Items {
+		secure := map[string]bool{}
+		for _, t := range ing.Spec.TLS {
+			for _, h := range t.Hosts {
+				secure[h] = true
+			}
+		}
+		for _, r := range ing.Spec.Rules {
+			if r.HTTP == nil || r.Host == "" {
+				continue
+			}
+			scheme := "http://"
+			if secure[r.Host] {
+				scheme = "https://"
+			}
+			for _, p := range r.HTTP.Paths {
+				if p.Backend.Service == nil {
+					continue
+				}
+				path := p.Path
+				if path == "/" {
+					path = ""
+				}
+				out[p.Backend.Service.Name] = append(out[p.Backend.Service.Name], scheme+r.Host+path)
+			}
+		}
+	}
+	return out
 }
 
 // endpointCounts counts the pods behind every service in a namespace.

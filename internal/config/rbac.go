@@ -56,6 +56,15 @@ const (
 	OpConfigMapUpdate = "configmap-update"
 	OpConfigMapDelete = "configmap-delete"
 
+	// Ingresses: how a service is reached from outside. Listing includes the
+	// checks — whether the service, its port, its pods and its certificate are
+	// there — read through the portal's own account where they reach beyond
+	// the namespace.
+	OpIngressList   = "ingress-list"
+	OpIngressCreate = "ingress-create"
+	OpIngressUpdate = "ingress-update"
+	OpIngressDelete = "ingress-delete"
+
 	// Granted per namespace to see what happened there — everyone's actions,
 	// not only the holder's — and globally for the entries that belong to no
 	// namespace: sign-ins, and who was granted what.
@@ -98,6 +107,7 @@ func NamespaceOperations() []string {
 		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
 		OpConfigMapList, OpConfigMapCreate, OpConfigMapUpdate, OpConfigMapDelete,
+		OpIngressList, OpIngressCreate, OpIngressUpdate, OpIngressDelete,
 		OpAuditRead,
 		OpImageRebuild, OpPipelineDeploy,
 	}

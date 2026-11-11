@@ -53,6 +53,10 @@ const (
 	OpConfigMapCreate     = config.OpConfigMapCreate
 	OpConfigMapUpdate     = config.OpConfigMapUpdate
 	OpConfigMapDelete     = config.OpConfigMapDelete
+	OpIngressList         = config.OpIngressList
+	OpIngressCreate       = config.OpIngressCreate
+	OpIngressUpdate       = config.OpIngressUpdate
+	OpIngressDelete       = config.OpIngressDelete
 
 	OpAccessRestore = config.OpAccessRestore
 
@@ -188,6 +192,7 @@ func (s *Server) Router() http.Handler {
 		// handler: the answer is the namespaces the caller holds service-list
 		// in, and the services themselves are read one namespace at a time.
 		r.Get("/services", s.handleServiceNamespaces)
+		r.Get("/ingresses", s.handleIngressNamespaces)
 
 		// Where the access model lives. The state is readable by whoever may
 		// see the users list; taking a copy or putting one back is a separate
@@ -284,6 +289,15 @@ func (s *Server) Router() http.Handler {
 		r.Post(base+"/configmaps", s.requireOp(OpConfigMapCreate, s.handleCreateConfigMap))
 		r.Put(base+"/configmaps/{name}", s.requireOp(OpConfigMapUpdate, s.handleUpdateConfigMap))
 		r.Delete(base+"/configmaps/{name}", s.requireOp(OpConfigMapDelete, s.handleDeleteConfigMap))
+
+		// ingresses
+		r.Get(base+"/ingresses", s.requireOp(OpIngressList, s.handleListIngresses))
+		r.Get(base+"/ingresses/{name}", s.requireOp(OpIngressList, s.handleGetIngress))
+		r.Get(base+"/ingress-suggestion", s.requireOp(OpIngressCreate, s.handleSuggestIngress))
+		r.Post(base+"/ingress-check", s.requireOp(OpIngressList, s.handleCheckIngress))
+		r.Post(base+"/ingresses", s.requireOp(OpIngressCreate, s.handleCreateIngress))
+		r.Put(base+"/ingresses/{name}", s.requireOp(OpIngressUpdate, s.handleUpdateIngress))
+		r.Delete(base+"/ingresses/{name}", s.requireOp(OpIngressDelete, s.handleDeleteIngress))
 		// Rolling a workload out after what it reads has changed. The same act
 		// as restarting one of its pods, and the same permission.
 		r.Post(base+"/workloads/{kind}/{name}/restart", s.requireOp(OpPodRestart, s.handleRestartWorkload))

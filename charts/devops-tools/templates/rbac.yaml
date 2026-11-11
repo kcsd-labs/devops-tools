@@ -55,6 +55,11 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
+
+  # The Ingress page checks a class exists, and suggests the default one.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
   {{- end }}
 
   # Rolling restart patches the workload's pod template; the rest is needed to
