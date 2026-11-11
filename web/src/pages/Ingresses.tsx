@@ -252,7 +252,9 @@ export function Ingresses() {
                       </div>
                     </td>
                     <td className="mono">
-                      {r.service}:{r.port}
+                      {/* Written as the Services tab writes an address. */}
+                      {r.service}
+                      <span className="svc-ns">.{namespace}</span>:{r.port}
                       {r.ready && (
                         <span className={"muted ing-ready" + (r.ready.ready === 0 ? " warn-text" : "")}>
                           {" "}

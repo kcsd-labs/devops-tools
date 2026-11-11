@@ -19,6 +19,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -214,5 +215,29 @@ func TestCertificateCoverage(t *testing.T) {
 		if c.covers(host) != want {
 			t.Errorf("covers(%s) = %v", host, !want)
 		}
+	}
+}
+
+// What ingress-nginx serves without complaint is not reported: no class, no
+// address written back, a backend naming the pods' port.
+func TestWhatTheControllerServesIsNotAProblem(t *testing.T) {
+	w, cs := ingressWorldFor(t)
+	ctx := context.Background()
+	svc := svcObj("abs-dev", "abs-ui", corev1.ServicePort{Name: "http", Port: 80, TargetPort: intstr.FromInt32(8080)})
+	if _, err := cs.CoreV1().Services("abs-dev").Create(ctx, svc, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	w = buildWorld(ctx, cs, cs, "abs-dev")
+	w.ready["abs-ui"] = behind{Endpoints: Endpoints{Ready: 1, Total: 1}}
+	ing := ingObj("abs-dev", "ui", time.Now().Add(-48*time.Hour), "ui.dev.example.com", "/", "abs-ui", 8080, "")
+	ing.Status = networkingv1.IngressStatus{}
+	w.defaultClass = ""
+	if rs := w.routes(ing); len(rs[0].Problems) != 0 {
+		t.Errorf("served by ingress-nginx, yet: %+v", rs[0].Problems)
+	}
+	ing.Spec.TLS = []networkingv1.IngressTLS{{SecretName: "gone-tls", Hosts: []string{"ui.dev.example.com"}}}
+	p := w.routes(ing)[0].Problems
+	if len(p) != 1 || p[0].Level != "warn" || !strings.Contains(p[0].Text, "default certificate") {
+		t.Errorf("a missing secret: %+v", p)
 	}
 }

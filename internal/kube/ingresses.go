@@ -273,10 +273,11 @@ func portOf(b *networkingv1.IngressServiceBackend) string {
 	return strconv.Itoa(int(b.Port.Number))
 }
 
-// servicePortFor finds the service port a backend names.
+// servicePortFor finds the service port a backend names: by number or name,
+// or — as ingress-nginx also accepts — by the port it targets on the pods.
 func servicePortFor(svc corev1.Service, port string) bool {
 	for _, p := range svc.Spec.Ports {
-		if p.Name == port || strconv.Itoa(int(p.Port)) == port {
+		if p.Name == port || strconv.Itoa(int(p.Port)) == port || p.TargetPort.String() == port {
 			return true
 		}
 	}
@@ -323,17 +324,15 @@ func classOf(ing *networkingv1.Ingress) string {
 // routes lists what one ingress answers, each with what stands in its way.
 func (w *ingressWorld) routes(ing *networkingv1.Ingress) []IngressRoute {
 	class := classOf(ing)
+	// Only a class that is named and does not exist is said to be a problem,
+	// and only while no controller has given the ingress an address. An
+	// ingress with no class is served by a controller set to watch those, and
+	// many controllers never write an address back: neither means anything is
+	// wrong, and saying so on every row would drown what is.
 	var common []IngressProblem
-	if class != "" && w.classes != nil && !w.classes[class] {
-		common = append(common, IngressProblem{Level: "error",
-			Text: "no ingress class " + class + " in the cluster: no controller will serve it"})
-	} else if class == "" && w.classes != nil && w.defaultClass == "" {
+	if class != "" && w.classes != nil && !w.classes[class] && len(ing.Status.LoadBalancer.Ingress) == 0 {
 		common = append(common, IngressProblem{Level: "warn",
-			Text: "no class, and none in the cluster is the default: a controller may not pick it up"})
-	}
-	if len(ing.Status.LoadBalancer.Ingress) == 0 && ing.CreationTimestamp.Time.Before(w.now.Add(-2*time.Minute)) {
-		common = append(common, IngressProblem{Level: "warn",
-			Text: "no address yet: the controller has not taken it up"})
+			Text: "no ingress class " + class + " in the cluster"})
 	}
 
 	tlsFor := map[string]string{}
@@ -388,8 +387,10 @@ func (w *ingressWorld) routes(ing *networkingv1.Ingress) []IngressRoute {
 			}
 			switch {
 			case !known:
-				r.Problems = append(r.Problems, IngressProblem{Level: "error",
-					Text: "no TLS secret " + secret + " in this namespace", Fix: fix})
+				// The controller answers with its default certificate then,
+				// which may well be the right one: worth knowing, not alarming.
+				r.Problems = append(r.Problems, IngressProblem{Level: "warn",
+					Text: "no secret " + secret + " here: the controller's default certificate is served", Fix: fix})
 			case c == nil:
 				r.Problems = append(r.Problems, IngressProblem{Level: "error",
 					Text: "the secret " + secret + " holds no readable certificate", Fix: fix})
