@@ -55,7 +55,6 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		"mayLogs":    s.authz.Allowed(user.Roles, namespace, OpLogs),
 		"mayHelm":    s.authz.Allowed(user.Roles, namespace, OpHelmList),
 		"mayRequest": s.authz.Allowed(user.Roles, namespace, OpServiceRequest),
-		"mayExpose":  s.authz.Allowed(user.Roles, namespace, OpIngressCreate),
 		"mayIngress": s.authz.Allowed(user.Roles, namespace, OpIngressList),
 	})
 }

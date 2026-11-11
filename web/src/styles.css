@@ -2827,9 +2827,6 @@ a.seg-btn {
   border-radius: 10px;
   overflow: hidden;
 }
-.svc-outside a {
-  text-decoration: none;
-}
 @media (max-width: 760px) {
   .ing-rule {
     grid-template-columns: 1fr 1fr;

@@ -202,8 +202,6 @@ export interface ServicePort {
 export interface ServiceInfo {
   name: string;
   namespace: string;
-  /** The addresses ingresses give it from outside, as URLs. */
-  outside?: string[];
   /** ClusterIP, NodePort, LoadBalancer or ExternalName. */
   type: string;
   headless: boolean;
@@ -230,8 +228,7 @@ export interface ServiceList {
   mayLogs: boolean;
   mayHelm: boolean;
   mayRequest: boolean;
-  /** May create an ingress here, and may see the ingresses. */
-  mayExpose?: boolean;
+  /** May see the ingresses here: the Ingress tab is offered. */
   mayIngress?: boolean;
 }
 
