@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { useApi } from "../useApi";
 import { useSession } from "../session";
 import { GlobalToasts } from "../toasts";
@@ -196,7 +197,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="content">{children}</div>
+        <div className="content">
+          <ErrorBoundary resetKey={location.pathname}>{children}</ErrorBoundary>
+        </div>
       </main>
 
       <GlobalToasts />

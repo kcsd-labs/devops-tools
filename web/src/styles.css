@@ -2836,3 +2836,19 @@ a.seg-btn {
     grid-template-columns: 1fr;
   }
 }
+
+/* A page that failed to draw: named, with a way back. */
+.page-error .card-title {
+  margin-bottom: 6px;
+}
+.page-error-text {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+  border-radius: 9px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 12px 0;
+}
