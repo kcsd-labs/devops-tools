@@ -3574,3 +3574,9 @@ a.seg-btn {
   color: var(--muted);
   margin-bottom: 8px;
 }
+.cat-rechecking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}

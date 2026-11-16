@@ -35,17 +35,21 @@ type Archive struct {
 
 // Fetcher downloads chart archives and keeps the last few, since the same
 // version is read for its values, checked, and installed in short order.
+//
+// What is kept is the archive, not the loaded chart: Helm changes a chart as
+// it renders it — dependencies switched off by the values are taken out — so
+// each use loads its own from the kept bytes.
 type Fetcher struct {
 	http *http.Client
 
 	mu    sync.Mutex
-	cache map[string]*Archive
+	cache map[string][]byte
 	order []string
 }
 
 // NewFetcher returns a fetcher.
 func NewFetcher() *Fetcher {
-	return &Fetcher{http: &http.Client{Timeout: 60 * time.Second}, cache: map[string]*Archive{}}
+	return &Fetcher{http: &http.Client{Timeout: 60 * time.Second}, cache: map[string][]byte{}}
 }
 
 const cacheSize = 24
@@ -54,27 +58,28 @@ const cacheSize = 24
 // oci://registry/repo/chart:version — and loads the chart in it.
 func (f *Fetcher) Fetch(ctx context.Context, contentURL string) (*Archive, error) {
 	f.mu.Lock()
-	a, ok := f.cache[contentURL]
+	data, ok := f.cache[contentURL]
 	f.mu.Unlock()
-	if ok {
-		return a, nil
-	}
-
-	data, err := f.download(ctx, contentURL)
-	if err != nil {
-		return nil, err
+	if !ok {
+		var err error
+		if data, err = f.download(ctx, contentURL); err != nil {
+			return nil, err
+		}
 	}
 	ch, err := loader.LoadArchive(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("%s is not a chart that loads: %w", contentURL, err)
 	}
 	sum := sha256.Sum256(data)
-	a = &Archive{Chart: ch, Digest: "sha256:" + hex.EncodeToString(sum[:])}
+	a := &Archive{Chart: ch, Digest: "sha256:" + hex.EncodeToString(sum[:])}
+	if ok {
+		return a, nil
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.cache[contentURL]; !ok {
-		f.cache[contentURL] = a
+		f.cache[contentURL] = data
 		f.order = append(f.order, contentURL)
 		if len(f.order) > cacheSize {
 			delete(f.cache, f.order[0])

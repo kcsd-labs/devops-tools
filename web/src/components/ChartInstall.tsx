@@ -209,14 +209,22 @@ export function ChartInstall(props: InstallProps) {
 
   // Checked again shortly after each change: what is installed is exactly
   // what was last checked.
+  // A newer check abandons the one still running: the server stops working on
+  // values nobody looks at any more.
   const seq = useRef(0);
+  const running = useRef<AbortController | null>(null);
+  const [checkStarted, setCheckStarted] = useState(0);
   useEffect(() => {
     if (!ask) return;
     const n = ++seq.current;
     setChecking(true);
     const t = setTimeout(() => {
+      running.current?.abort();
+      const ctl = new AbortController();
+      running.current = ctl;
+      setCheckStarted(Date.now());
       api
-        .catalogCheck(target, ask)
+        .catalogCheck(target, ask, ctl.signal)
         .then((c) => {
           if (n !== seq.current) return;
           setCheck(c);
@@ -226,12 +234,19 @@ export function ChartInstall(props: InstallProps) {
             setAsked((cur) => [...cur, ...c.required!.filter((r) => !cur.some((x) => x.key === r.key))]);
           }
         })
-        .catch((e) => n === seq.current && (setCheckError(e.message), setCheck(undefined)))
+        .catch((e) => {
+          if (e?.name === "AbortError") return;
+          if (n === seq.current) {
+            setCheckError(e.message);
+            setCheck(undefined);
+          }
+        })
         .finally(() => n === seq.current && setChecking(false));
-    }, 700);
+    }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+  useEffect(() => () => running.current?.abort(), []);
 
   const ready = !!check?.ok && checkedKey === key && !checking && !busy;
 
@@ -570,6 +585,7 @@ export function ChartInstall(props: InstallProps) {
           <CheckLine
             check={check}
             checking={checking}
+            since={checkStarted}
             error={checkError}
             open={showProblems}
             onToggle={() => setShowProblems((x) => !x)}
@@ -1266,23 +1282,27 @@ function TemplateAdmin({
 function CheckLine({
   check,
   checking,
+  since,
   error,
   open,
   onToggle,
 }: {
   check?: CatalogCheck;
   checking: boolean;
+  since: number;
   error?: string;
   open: boolean;
   onToggle: () => void;
 }) {
+  const elapsed = useElapsed(checking ? since : 0);
+  const slow = elapsed >= 4 ? ` ${elapsed} s — a large chart takes a while` : "";
   if (error) return <span className="cat-line err">⚠ {error}</span>;
   if (!check)
     return (
       <span className="cat-line muted">
         {checking ? (
           <>
-            <span className="cat-spin" aria-hidden="true" /> Checking against the cluster…
+            <span className="cat-spin" aria-hidden="true" /> Checking against the cluster…{slow}
           </>
         ) : (
           "Not checked yet"
@@ -1317,9 +1337,25 @@ function CheckLine({
           {open ? "▾" : "▴"}
         </button>
       )}
-      {checking && <span className="cat-spin" aria-label="Checking again" />}
+      {checking && (
+        <span className="muted cat-rechecking">
+          <span className="cat-spin" aria-label="Checking again" />
+          {slow && ` checking again…${slow}`}
+        </span>
+      )}
     </span>
   );
+}
+
+/** Whole seconds since a moment, ticking; 0 when there is none. */
+function useElapsed(since: number): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!since) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  return since ? Math.max(0, Math.floor((now - since) / 1000)) : 0;
 }
 
 // Lines lit up for a moment after the questions wrote them.

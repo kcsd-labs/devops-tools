@@ -124,6 +124,9 @@ func TestFetchLoadsAndDigests(t *testing.T) {
 	if hits != 1 || again.Digest != a.Digest {
 		t.Errorf("a second fetch of the same version should come from the cache (hits %d)", hits)
 	}
+	if again.Chart == a.Chart {
+		t.Error("each fetch gets its own chart: Helm changes the one it renders")
+	}
 	if _, err := f.Fetch(context.Background(), "file:///etc/passwd"); err == nil {
 		t.Error("only http, https and oci addresses are fetched")
 	}

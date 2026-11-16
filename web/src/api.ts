@@ -732,9 +732,10 @@ export function createApi(token: string | undefined) {
 
   // The catalog answers its errors as {"error": …}, with the failed check
   // beside it when that is the reason; both are worth showing as they are.
-  const catalogCall = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+  const catalogCall = async <T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
     const res = await fetch(`/api${path}`, {
       method,
+      signal,
       headers: body === undefined ? headers : { ...headers, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -1027,8 +1028,9 @@ export function createApi(token: string | undefined) {
         "GET",
         `/namespaces/${ns}/helm/releases/${encodeURIComponent(name)}/catalog`
       ),
-    catalogCheck: (ns: string, ask: CatalogAsk) =>
-      catalogCall<CatalogCheck>("POST", `/namespaces/${ns}/helm/check`, ask),
+    /** A check; signal abandons it when a newer one is asked for. */
+    catalogCheck: (ns: string, ask: CatalogAsk, signal?: AbortSignal) =>
+      catalogCall<CatalogCheck>("POST", `/namespaces/${ns}/helm/check`, ask, signal),
     catalogRequest: (ns: string, ask: CatalogAsk) =>
       catalogCall<HelmRequest>("POST", `/namespaces/${ns}/helm/requests`, ask),
     /** Brings the values from what `previous` filled in to what `fill` does;

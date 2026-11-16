@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ data:
 	if len(plan.Required) != 1 {
 		t.Fatalf("one at a time from helm: %+v", plan.Required)
 	}
-	m.askAllAtOnce(plan, "team", "app", ch, vals)
+	m.askAllAtOnce(context.Background(), plan, "team", "app", ch, vals)
 	var keys []string
 	for _, r := range plan.Required {
 		keys = append(keys, r.Key)

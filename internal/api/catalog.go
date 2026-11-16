@@ -515,7 +515,31 @@ func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDige
 	if err != nil {
 		return nil, nil, nil, askError{err}
 	}
+	start := time.Now()
+	var planned *kube.ReleasePlan
+	var fetchTook, imagesTook time.Duration
+	defer func() {
+		// A slow check says where the time went: the chart's download, its
+		// rendering, the search for what it needs, the registries.
+		total := time.Since(start)
+		if total < 2*time.Second {
+			return
+		}
+		attrs := []any{"chart", ask.Repo + "/" + ask.Chart, "version", ask.Version, "namespace", ns,
+			"total", total.Round(time.Millisecond), "fetch", fetchTook.Round(time.Millisecond),
+			"images", imagesTook.Round(time.Millisecond)}
+		if planned != nil {
+			for _, t := range planned.Timings {
+				attrs = append(attrs, t.Part, t.Took.Round(time.Millisecond))
+			}
+		}
+		if ctx.Err() != nil {
+			attrs = append(attrs, "abandoned", true)
+		}
+		slog.Info("slow catalog check", attrs...)
+	}()
 	_, arc, err := s.catalog.fetch(ctx, ask.Repo, ask.Chart, ask.Version)
+	fetchTook = time.Since(start)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -543,9 +567,12 @@ func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDige
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	planned = plan
 	res.ReleasePlan = plan
 	if plan.OK() && len(plan.Images) > 0 {
+		began := time.Now()
 		res.ImageStates = s.catalog.images(ctx, plan.Images)
+		imagesTook = time.Since(began)
 		for _, st := range res.ImageStates {
 			switch {
 			case st.Missing:

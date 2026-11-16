@@ -106,8 +106,17 @@ type ReleasePlan struct {
 	// own words, one point each.
 	Refusal *Refusal `json:"refusal,omitempty"`
 
+	// Timings are how long each part of the plan took, for the log.
+	Timings []Timing `json:"-"`
+
 	// unknownKind: an object of a kind the cluster was not known to have.
 	unknownKind bool
+}
+
+// Timing is one part of a plan and how long it took.
+type Timing struct {
+	Part string
+	Took time.Duration
 }
 
 // Refusal is a chart's own reasons for not rendering, and where it said so.
@@ -177,10 +186,12 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		// Nothing to ask the cluster about a namespace that is not there:
 		// rendered as helm template would, it is created with the release.
 		plan.NewNamespace = true
+		began := time.Now()
 		rel, err := m.renderOffline(namespace, name, ch, vals)
+		plan.Timings = append(plan.Timings, Timing{"render", time.Since(began)})
 		if err != nil {
 			plan.notRendered(err, ch)
-			m.askAllAtOnce(plan, namespace, name, ch, vals)
+			m.askAllAtOnce(ctx, plan, namespace, name, ch, vals)
 			return plan, nil
 		}
 		return m.finishPlan(plan, rel, defined, namespace)
@@ -204,7 +215,9 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		return plan, nil
 	}
 
+	began := time.Now()
 	rel, err := m.dryRun(ctx, cfg, namespace, name, ch, vals, upgrade)
+	plan.Timings = append(plan.Timings, Timing{"render", time.Since(began)})
 	if err != nil && staleKinds(err) {
 		// A kind the kept list of the cluster's kinds does not have yet.
 		m.forgetDiscovery()
@@ -220,7 +233,7 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 	}
 	if err != nil {
 		plan.notRendered(err, ch)
-		m.askAllAtOnce(plan, namespace, name, ch, vals)
+		m.askAllAtOnce(ctx, plan, namespace, name, ch, vals)
 		return plan, nil
 	}
 	return m.finishPlan(plan, rel, defined, namespace)
@@ -253,18 +266,28 @@ func (m *Manager) dryRun(ctx context.Context, cfg *action.Configuration, namespa
 	return i.RunWithContext(ctx, ch, vals)
 }
 
-// probeRounds bounds how many keys in a row a chart is asked about.
-const probeRounds = 8
+// probeRounds bounds how many keys in a row a chart is asked about, and
+// probeBudget how long that may take.
+const (
+	probeRounds = 8
+	probeBudget = 6 * time.Second
+)
 
 // askAllAtOnce finds every key a chart will ask for, not only the first: a
 // chart stops at the first value it lacks, so each one found is given a
 // stand-in and the chart rendered again, without the cluster, until it asks
 // for nothing new. Whoever installs then fills them in one go instead of one
 // check at a time.
-func (m *Manager) askAllAtOnce(plan *ReleasePlan, namespace, name string, ch *chart.Chart, vals map[string]any) {
+func (m *Manager) askAllAtOnce(ctx context.Context, plan *ReleasePlan, namespace, name string, ch *chart.Chart, vals map[string]any) {
 	if len(plan.Required) == 0 {
 		return
 	}
+	// A large chart takes seconds to render: the search stops when its time
+	// is up, or when whoever asked has moved on to another check.
+	start := time.Now()
+	defer func() {
+		plan.Timings = append(plan.Timings, Timing{"probe", time.Since(start)})
+	}()
 	probe, err := copyValues(vals)
 	if err != nil {
 		return
@@ -275,7 +298,7 @@ func (m *Manager) askAllAtOnce(plan *ReleasePlan, namespace, name string, ch *ch
 		said[msg] = true
 	}
 	fresh := plan.Required
-	for round := 0; round < probeRounds && len(fresh) > 0; round++ {
+	for round := 0; round < probeRounds && len(fresh) > 0 && ctx.Err() == nil && time.Since(start) < probeBudget; round++ {
 		for _, r := range fresh {
 			seen[r.Key] = true
 			setValuePath(probe, r.Key, "x")
@@ -343,6 +366,8 @@ func (m *Manager) finishPlan(plan *ReleasePlan, rel *release.Release, defined ma
 	}
 	// Checked against the kept list of the cluster's kinds; a kind it lacks
 	// sends the check round once more, with a fresh list.
+	began := time.Now()
+	defer func() { plan.Timings = append(plan.Timings, Timing{"objects", time.Since(began)}) }()
 	base := *plan
 	base.Objects = append([]PlanObject{}, plan.Objects...)
 	base.Problems = append([]PlanProblem{}, plan.Problems...)
