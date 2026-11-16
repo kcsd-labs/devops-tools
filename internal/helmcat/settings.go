@@ -2,10 +2,11 @@ package helmcat
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
-	"sigs.k8s.io/yaml"
+	yaml3 "gopkg.in/yaml.v3"
 )
 
 // What can be filled in from the cluster, rather than typed: where a chart
@@ -161,93 +162,236 @@ type IngressFill struct {
 	TLS string `json:"tls"`
 }
 
-// ApplyFill writes a fill into values written as YAML, and returns them as
-// YAML. Keys already there are overwritten where the fill names them and kept
-// otherwise.
-func ApplyFill(text string, f Fill) (string, error) {
-	vals := map[string]any{}
-	if strings.TrimSpace(text) != "" {
-		if err := yaml.Unmarshal([]byte(text), &vals); err != nil {
-			return "", fmt.Errorf("your values are not YAML: %w", err)
-		}
-		if vals == nil {
-			vals = map[string]any{}
-		}
-	}
+// assignments are the keys a fill sets, each with its value.
+func (f Fill) assignments() (map[string]any, error) {
+	out := map[string]any{}
 	if f.StorageClass != "" {
 		for _, p := range f.StoragePaths {
-			if err := setPath(vals, p, f.StorageClass); err != nil {
-				return "", err
-			}
+			out[p] = f.StorageClass
 		}
 	}
-	if in := f.Ingress; in != nil {
-		if in.Host == "" {
-			return "", fmt.Errorf("the ingress needs a host")
-		}
-		block := map[string]any{"enabled": true}
-		if in.Class != "" {
-			key := in.ClassKey
-			if key != "ingressClassName" && key != "className" {
-				key = "ingressClassName"
-			}
-			block[key] = in.Class
-		}
-		switch in.Shape {
-		case "hostname":
-			block["hostname"] = in.Host
-			if in.TLS != "" {
-				block["extraTls"] = []any{map[string]any{"hosts": []any{in.Host}, "secretName": in.TLS}}
-			}
-		case "hosts":
-			block["hosts"] = []any{map[string]any{
-				"host":  in.Host,
-				"paths": []any{map[string]any{"path": "/", "pathType": "Prefix"}},
-			}}
-			if in.TLS != "" {
-				block["tls"] = []any{map[string]any{"hosts": []any{in.Host}, "secretName": in.TLS}}
-			}
-		case "hostlist":
-			block["hosts"] = []any{in.Host}
-			if in.TLS != "" {
-				block["tls"] = []any{map[string]any{"hosts": []any{in.Host}, "secretName": in.TLS}}
-			}
-		default:
-			return "", fmt.Errorf("unknown ingress shape %q", in.Shape)
-		}
-		for k, v := range block {
-			if err := setPath(vals, in.Path+"."+k, v); err != nil {
-				return "", err
-			}
-		}
+	in := f.Ingress
+	if in == nil {
+		return out, nil
 	}
-	out, err := yaml.Marshal(vals)
-	if err != nil {
-		return "", err
+	if in.Host == "" {
+		return nil, fmt.Errorf("the ingress needs a host")
 	}
-	return string(out), nil
+	block := map[string]any{"enabled": true}
+	if in.Class != "" {
+		key := in.ClassKey
+		if key != "ingressClassName" && key != "className" {
+			key = "ingressClassName"
+		}
+		block[key] = in.Class
+	}
+	tls := []any{map[string]any{"hosts": []any{in.Host}, "secretName": in.TLS}}
+	switch in.Shape {
+	case "hostname":
+		block["hostname"] = in.Host
+		if in.TLS != "" {
+			block["extraTls"] = tls
+		}
+	case "hosts":
+		block["hosts"] = []any{map[string]any{
+			"host":  in.Host,
+			"paths": []any{map[string]any{"path": "/", "pathType": "Prefix"}},
+		}}
+		if in.TLS != "" {
+			block["tls"] = tls
+		}
+	case "hostlist":
+		block["hosts"] = []any{in.Host}
+		if in.TLS != "" {
+			block["tls"] = tls
+		}
+	default:
+		return nil, fmt.Errorf("unknown ingress shape %q", in.Shape)
+	}
+	for k, v := range block {
+		out[in.Path+"."+k] = v
+	}
+	return out, nil
 }
 
-// setPath sets a.b.c, making the maps on the way.
-func setPath(m map[string]any, path string, v any) error {
+// ApplyFill brings values written as YAML from what an earlier fill, prev,
+// wrote to what f writes now — the install form sends each change as it is
+// made. Keys prev wrote and f does not are taken out again. A key whose value
+// is no longer what prev wrote was changed by hand in the editor: it is left
+// as it is, and named in kept. Everything else in the values, comments
+// included, stays as it was written.
+func ApplyFill(text string, f, prev Fill) (out string, kept []string, err error) {
+	want, err := f.assignments()
+	if err != nil {
+		return "", nil, err
+	}
+	had, err := prev.assignments()
+	if err != nil {
+		had = map[string]any{}
+	}
+
+	var doc yaml3.Node
+	if strings.TrimSpace(text) != "" {
+		if err := yaml3.Unmarshal([]byte(text), &doc); err != nil {
+			return "", nil, fmt.Errorf("your values are not YAML: %w", err)
+		}
+	}
+	if len(doc.Content) == 0 {
+		doc = yaml3.Node{Kind: yaml3.DocumentNode, Content: []*yaml3.Node{{Kind: yaml3.MappingNode, Tag: "!!map"}}}
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml3.MappingNode {
+		if root.Tag != "!!null" {
+			return "", nil, fmt.Errorf("your values are not a map of settings")
+		}
+		*root = yaml3.Node{Kind: yaml3.MappingNode, Tag: "!!map"}
+	}
+
+	// A key prev wrote is the form's while it still holds what prev wrote.
+	ours := func(path string) bool {
+		old, wrote := had[path]
+		if !wrote {
+			return true
+		}
+		cur := lookup(root, path)
+		return cur == nil || sameValue(cur, old)
+	}
+
+	paths := make([]string, 0, len(had)+len(want))
+	for p := range had {
+		paths = append(paths, p)
+	}
+	for p := range want {
+		if _, ok := had[p]; !ok {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		v, keep := want[p]
+		if !ours(p) {
+			if keep || !sameValue(lookup(root, p), had[p]) {
+				kept = append(kept, p)
+			}
+			continue
+		}
+		if !keep {
+			remove(root, strings.Split(p, "."))
+			continue
+		}
+		if cur := lookup(root, p); cur != nil && sameValue(cur, v) {
+			continue
+		}
+		if err := setNode(root, p, v); err != nil {
+			return "", nil, err
+		}
+	}
+
+	if len(root.Content) == 0 {
+		return "", kept, nil
+	}
+	var b strings.Builder
+	enc := yaml3.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return "", nil, err
+	}
+	_ = enc.Close()
+	return b.String(), kept, nil
+}
+
+// lookup finds the node at a.b.c, or nil.
+func lookup(m *yaml3.Node, path string) *yaml3.Node {
+	for _, k := range strings.Split(path, ".") {
+		if m == nil || m.Kind != yaml3.MappingNode {
+			return nil
+		}
+		m = child(m, k)
+	}
+	return m
+}
+
+// child is the value under key k of a mapping node, or nil.
+func child(m *yaml3.Node, k string) *yaml3.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == k {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// sameValue says whether a node holds v, compared as data, not as text.
+func sameValue(n *yaml3.Node, v any) bool {
+	var have any
+	if n == nil || n.Decode(&have) != nil {
+		return false
+	}
+	raw, err := yaml3.Marshal(v)
+	if err != nil {
+		return false
+	}
+	var want any
+	if yaml3.Unmarshal(raw, &want) != nil {
+		return false
+	}
+	return reflect.DeepEqual(have, want)
+}
+
+// setNode sets a.b.c to v, making the maps on the way.
+func setNode(m *yaml3.Node, path string, v any) error {
 	parts := strings.Split(path, ".")
 	for i, p := range parts {
 		if p == "" {
 			return fmt.Errorf("%q is not a path", path)
 		}
+		next := child(m, p)
 		if i == len(parts)-1 {
-			m[p] = v
+			var val yaml3.Node
+			if err := val.Encode(v); err != nil {
+				return err
+			}
+			if next != nil {
+				// Keep what was written beside the value.
+				val.LineComment, val.HeadComment, val.FootComment = next.LineComment, next.HeadComment, next.FootComment
+				*next = val
+			} else {
+				m.Content = append(m.Content, &yaml3.Node{Kind: yaml3.ScalarNode, Tag: "!!str", Value: p}, &val)
+			}
 			return nil
 		}
-		next, ok := m[p].(map[string]any)
-		if !ok {
-			if _, exists := m[p]; exists && m[p] != nil {
-				return fmt.Errorf("%s is set to something that is not a map in your values", strings.Join(parts[:i+1], "."))
-			}
-			next = map[string]any{}
-			m[p] = next
+		switch {
+		case next == nil:
+			next = &yaml3.Node{Kind: yaml3.MappingNode, Tag: "!!map"}
+			m.Content = append(m.Content, &yaml3.Node{Kind: yaml3.ScalarNode, Tag: "!!str", Value: p}, next)
+		case next.Kind == yaml3.MappingNode:
+		case next.Tag == "!!null":
+			*next = yaml3.Node{Kind: yaml3.MappingNode, Tag: "!!map"}
+		default:
+			return fmt.Errorf("%s is set to something that is not a map in your values", strings.Join(parts[:i+1], "."))
 		}
 		m = next
 	}
 	return nil
+}
+
+// remove takes out the key at the path, and any map left empty by it.
+func remove(m *yaml3.Node, parts []string) {
+	if m == nil || m.Kind != yaml3.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value != parts[0] {
+			continue
+		}
+		if len(parts) > 1 {
+			sub := m.Content[i+1]
+			remove(sub, parts[1:])
+			if sub.Kind != yaml3.MappingNode || len(sub.Content) > 0 {
+				return
+			}
+		}
+		m.Content = append(m.Content[:i], m.Content[i+2:]...)
+		return
+	}
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CatalogCheck, HelmRequest } from "../api";
+import type { CatalogCheck, CatalogProblem, HelmRequest } from "../api";
 
 // Installing from the catalog: the line that says what a check found, and the
 // words a request is shown with. Shared by the Helm page, the install dialog
@@ -64,27 +64,36 @@ export function CheckResult({
         )}
       </div>
     );
-  const errors = check.problems.filter((p) => p.level === "error");
   const warns = check.problems.filter((p) => p.level === "warn");
   const found = check.imageStates.filter((s) => !s.missing && !s.unknown).length;
   return (
     <div className={"cat-check" + (checking ? " stale" : "")}>
       {check.ok ? (
         <div className={"ing-check " + (warns.length > 0 ? "warn" : "ok")}>
-          {warns.length > 0 ? "⚠ Can be installed" : "✓ Check passed"} ·{upgrade ? "the release will hold" : "will create"} {objectSummary(check.objects) || "nothing"}
+          {warns.length > 0 ? "⚠ Can be installed" : "✓ Check passed"} · {upgrade ? "the release will hold" : "will create"} {objectSummary(check.objects) || "nothing"}
           {check.imageStates.length > 0 && ` · ${found}/${check.imageStates.length} images found`}
           {warns.length > 0 && ` · ${warns.length} ${warns.length === 1 ? "warning" : "warnings"} below, for whoever approves`}
         </div>
       ) : (
         <div className="ing-check err">✕ This cannot be installed as it is</div>
       )}
-      {[...errors, ...warns].map((p, i) => (
+      <ProblemList problems={check.problems} />
+    </div>
+  );
+}
+
+/** What a check found, errors first. */
+export function ProblemList({ problems }: { problems: CatalogProblem[] }) {
+  const sorted = [...problems.filter((p) => p.level === "error"), ...problems.filter((p) => p.level !== "error")];
+  return (
+    <>
+      {sorted.map((p, i) => (
         <div key={i} className={"cat-problem " + p.level}>
           <span className={"ing-state " + (p.level === "error" ? "error" : "warn")}>{p.level === "error" ? "error" : "warning"}</span>
           {p.text}
         </div>
       ))}
-    </div>
+    </>
   );
 }
 

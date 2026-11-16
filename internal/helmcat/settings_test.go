@@ -97,11 +97,11 @@ func TestDetect(t *testing.T) {
 }
 
 func TestApplyFill(t *testing.T) {
-	out, err := ApplyFill("master:\n  resources:\n    limits: {memory: 512Mi}\n", Fill{
+	out, _, err := ApplyFill("master:\n  resources:\n    limits: {memory: 512Mi}\n", Fill{
 		StorageClass: "local-path", StoragePaths: []string{"global.defaultStorageClass"},
 		Ingress: &IngressFill{IngressSpot: IngressSpot{Path: "ingress", Shape: "hostname", ClassKey: "ingressClassName"},
 			Host: "redis.dev.example.com", Class: "nginx", TLS: "wildcard-tls"},
-	})
+	}, Fill{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +120,8 @@ func TestApplyFill(t *testing.T) {
 		t.Error("what was in the values already must stay")
 	}
 
-	out, err = ApplyFill("", Fill{Ingress: &IngressFill{IngressSpot: IngressSpot{Path: "server.ingress", Shape: "hosts", ClassKey: "className"},
-		Host: "app.example.com"}})
+	out, _, err = ApplyFill("", Fill{Ingress: &IngressFill{IngressSpot: IngressSpot{Path: "server.ingress", Shape: "hosts", ClassKey: "className"},
+		Host: "app.example.com"}}, Fill{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,59 @@ func TestApplyFill(t *testing.T) {
 		t.Errorf("hosts-shaped ingress without class or tls = %v", ing)
 	}
 
-	if _, err := ApplyFill("ingress: off\n", Fill{Ingress: &IngressFill{IngressSpot: IngressSpot{Path: "ingress", Shape: "hosts"}, Host: "a.b"}}); err == nil {
+	if _, _, err := ApplyFill("ingress: off\n", Fill{Ingress: &IngressFill{IngressSpot: IngressSpot{Path: "ingress", Shape: "hosts"}, Host: "a.b"}}, Fill{}); err == nil {
 		t.Error("a value that is not a map should not be silently replaced")
+	}
+}
+
+// The form sends every change: what it wrote before comes out again, what was
+// changed by hand stays, and the rest of the values — comments too — is kept.
+func TestApplyFillFollowsTheForm(t *testing.T) {
+	spot := IngressSpot{Path: "ingress", Shape: "hostname", ClassKey: "ingressClassName"}
+	one := Fill{StorageClass: "nfs", StoragePaths: []string{"global.defaultStorageClass"},
+		Ingress: &IngressFill{IngressSpot: spot, Host: "a.example.com", Class: "nginx"}}
+	start := "# my settings\nreplicaCount: 2 # two is enough\n"
+
+	out, kept, err := ApplyFill(start, one, Fill{})
+	if err != nil || len(kept) != 0 {
+		t.Fatal(err, kept)
+	}
+	if !strings.Contains(out, "# my settings") || !strings.Contains(out, "# two is enough") {
+		t.Errorf("comments lost:\n%s", out)
+	}
+
+	// The ingress unticked: its keys go, and the map they were in.
+	two := Fill{StorageClass: "nfs", StoragePaths: one.StoragePaths}
+	out2, _, err := ApplyFill(out, two, one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out2, "ingress") || !strings.Contains(out2, "defaultStorageClass: nfs") {
+		t.Errorf("unticking the ingress:\n%s", out2)
+	}
+
+	// The host changed by hand, then the class in the form: the host stays.
+	edited := strings.Replace(out, "hostname: a.example.com", "hostname: mine.example.com", 1)
+	three := one
+	three.Ingress = &IngressFill{IngressSpot: spot, Host: "a.example.com", Class: "traefik"}
+	out3, kept, err := ApplyFill(edited, three, one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ing := values(t, out3)["ingress"].(map[string]any)
+	if ing["hostname"] != "mine.example.com" || ing["ingressClassName"] != "traefik" {
+		t.Errorf("ingress = %v", ing)
+	}
+	if strings.Join(kept, ",") != "ingress.hostname" {
+		t.Errorf("kept = %v", kept)
+	}
+
+	// Everything off again: back to what was typed.
+	out4, _, err := ApplyFill(out, Fill{}, one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := values(t, out4); len(v) != 1 || v["replicaCount"] != float64(2) {
+		t.Errorf("all off:\n%s", out4)
 	}
 }

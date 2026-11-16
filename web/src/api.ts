@@ -972,8 +972,10 @@ export function createApi(token: string | undefined) {
     catalogRequest: (ns: string, ask: CatalogAsk) =>
       catalogCall<HelmRequest>("POST", `/namespaces/${ns}/helm/requests`, ask),
     /** Writes what was filled from the cluster into the values. */
-    fillValues: (values: string, fill: ValuesFill) =>
-      catalogCall<{ values: string }>("POST", "/helm/values/fill", { values, ...fill }),
+    /** Brings the values from what `previous` filled in to what `fill` does;
+        `kept` are keys changed by hand since, which the form leaves alone. */
+    fillValues: (values: string, fill: ValuesFill, previous: ValuesFill) =>
+      catalogCall<{ values: string; kept: string[] }>("POST", "/helm/values/fill", { values, ...fill, previous }),
     /** Requests in every namespace the caller works in. */
     myRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/my-requests"),
     withdrawRequest: (ns: string, id: string) =>

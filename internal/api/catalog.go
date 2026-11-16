@@ -329,24 +329,28 @@ func (s *Server) handleCatalogRelease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rel)
 }
 
-// handleFillValues writes what the install dialog filled from the cluster into
-// the values: a storage class, an ingress. Pure text in and out; nothing is
-// read or changed in the cluster.
+// handleFillValues writes what the install form fills from the cluster into
+// the values — a storage class, an ingress — replacing what it wrote before
+// (previous). Pure text in and out; nothing is read or changed in the cluster.
 func (s *Server) handleFillValues(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Values string `json:"values"`
 		helmcat.Fill
+		Previous helmcat.Fill `json:"previous"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request does not read: " + err.Error()})
 		return
 	}
-	out, err := helmcat.ApplyFill(body.Values, body.Fill)
+	out, kept, err := helmcat.ApplyFill(body.Values, body.Fill, body.Previous)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"values": out})
+	if kept == nil {
+		kept = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"values": out, "kept": kept})
 }
 
 // catalogAsk is what a check or a request carries.
