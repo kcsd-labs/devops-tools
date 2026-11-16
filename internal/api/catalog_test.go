@@ -237,8 +237,10 @@ func TestRequestsThatDoNotPass(t *testing.T) {
 	if code, out := f.call(t, "anna", "POST", reqs, ask("cache", "bad: true\n")); code != http.StatusUnprocessableEntity {
 		t.Errorf("a failing check: %d %v", code, out)
 	}
-	if code, _ := f.call(t, "anna", "POST", reqs, ask("cache", "image: bitnami/gone:1\n")); code != http.StatusUnprocessableEntity {
-		t.Errorf("an image that is not there: %d", code)
+	// An image not found is the administrator's to weigh — the nodes may pull
+	// it from a mirror — so the request goes through, with the warning on it.
+	if code, out := f.call(t, "anna", "POST", reqs, ask("gone", "image: bitnami/gone:1\n")); code != http.StatusCreated {
+		t.Errorf("an image that is not there should only warn: %d %v", code, out)
 	}
 	if code, _ := f.call(t, "anna", "POST", reqs, ask("Not_A_Name", "")); code != http.StatusBadRequest {
 		t.Errorf("a bad release name: %d", code)

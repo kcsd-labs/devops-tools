@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"helm.sh/helm/v3/pkg/chart"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -27,13 +28,18 @@ func testMapper() meta.RESTMapper {
 
 func planOf(t *testing.T, docs ...string) *ReleasePlan {
 	t.Helper()
+	return planWith(t, nil, docs...)
+}
+
+func planWith(t *testing.T, defined map[schema.GroupKind]bool, docs ...string) *ReleasePlan {
+	t.Helper()
 	plan := &ReleasePlan{}
 	for _, d := range docs {
 		var obj map[string]any
 		if err := yaml.Unmarshal([]byte(d), &obj); err != nil {
 			t.Fatal(err)
 		}
-		checkObject(plan, testMapper(), "payments-dev", &unstructured.Unstructured{Object: obj}, false)
+		checkObject(plan, testMapper(), defined, "payments-dev", &unstructured.Unstructured{Object: obj}, false)
 	}
 	return plan
 }
@@ -75,7 +81,9 @@ roleRef: {kind: ClusterRole, name: view}
 	}
 }
 
-func TestPlanRefusesWhatReachesPastTheNamespace(t *testing.T) {
+// What reaches past the namespace or into the node is the administrator's
+// call: it is spelled out, not refused.
+func TestPlanWarnsAboutWhatReachesPastTheNamespace(t *testing.T) {
 	cases := map[string]string{
 		"cluster-wide": `
 apiVersion: rbac.authorization.k8s.io/v1
@@ -110,15 +118,46 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata: {name: b}
 roleRef: {kind: ClusterRole, name: cluster-admin}`,
-		"unknown kind": `
-apiVersion: example.com/v1
-kind: Widget
-metadata: {name: w}`,
 	}
 	for name, doc := range cases {
-		if p := planOf(t, doc); p.OK() {
-			t.Errorf("%s: should be refused", name)
+		p := planOf(t, doc)
+		if !p.OK() || len(p.Problems) != 1 || p.Problems[0].Level != "warn" {
+			t.Errorf("%s: should pass with one warning:\n%s", name, problemsText(p))
 		}
+	}
+}
+
+func TestPlanKinds(t *testing.T) {
+	widget := `
+apiVersion: example.com/v1
+kind: Widget
+metadata: {name: w}`
+	if p := planOf(t, widget); p.OK() {
+		t.Error("a kind neither the cluster nor the chart defines cannot be installed")
+	}
+	if p := planWith(t, map[schema.GroupKind]bool{{Group: "example.com", Kind: "Widget"}: false}, widget); !p.OK() || len(p.Problems) != 0 {
+		t.Errorf("a namespaced kind the chart defines is fine:\n%s", problemsText(p))
+	}
+	if p := planWith(t, map[schema.GroupKind]bool{{Group: "example.com", Kind: "Widget"}: true}, widget); !p.OK() || len(p.Problems) != 1 {
+		t.Errorf("a cluster-wide kind the chart defines warns:\n%s", problemsText(p))
+	}
+}
+
+func TestChartKinds(t *testing.T) {
+	ch := &chart.Chart{Metadata: &chart.Metadata{Name: "op"}, Files: []*chart.File{{Name: "crds/widgets.yaml", Data: []byte(`
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: widgets.example.com}
+spec: {group: example.com, scope: Namespaced, names: {kind: Widget, plural: widgets}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: gadgets.example.com}
+spec: {group: example.com, scope: Cluster, names: {kind: Gadget, plural: gadgets}}
+`)}}}
+	got := chartKinds(ch)
+	if len(got) != 2 || got[schema.GroupKind{Group: "example.com", Kind: "Widget"}] || !got[schema.GroupKind{Group: "example.com", Kind: "Gadget"}] {
+		t.Errorf("chartKinds = %v", got)
 	}
 }
 

@@ -18,15 +18,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 )
 
 // Charts from the catalog are installed with the portal's own account, not
 // the requester's: a developer holds no right to create a StatefulSet, and the
 // point is that they need not. What keeps that from being a way round every
-// other rule is the plan below — the chart is rendered first, and anything
-// that reaches past the namespace, or into the node, is refused before anyone
-// is asked to approve it.
+// other rule is the plan below and the administrator who reads it: the chart
+// is rendered first, and anything that reaches past the namespace, or into the
+// node, is spelled out as a warning before anyone is asked to approve it. What
+// is acceptable is the administrator's call, not the portal's.
 
 // Labels on a release installed from the catalog, saying where it came from.
 // Helm keeps them on the release, so they survive the portal and are how an
@@ -71,8 +73,9 @@ func labelValue(s string) bool {
 	return true
 }
 
-// PlanProblem is something a plan found. Errors stop the install; warnings are
-// for the people deciding.
+// PlanProblem is something a plan found. Errors are what cannot work at all —
+// the chart does not render, the name is taken; warnings are for the people
+// deciding.
 type PlanProblem struct {
 	Level string `json:"level"` // error | warn
 	Text  string `json:"text"`
@@ -117,10 +120,23 @@ func (p *ReleasePlan) warn(format string, a ...any) {
 func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *chart.Chart, vals map[string]any, upgrade bool) (*ReleasePlan, error) {
 	plan := &ReleasePlan{Objects: []PlanObject{}, Problems: []PlanProblem{}, Images: []string{}}
 
-	if crds := ch.CRDObjects(); len(crds) > 0 {
-		plan.fail("the chart brings its own resource definitions (%s) — they are cluster-wide, so it is not installed from the catalog",
-			strings.TrimSuffix(crds[0].Filename, ".yaml"))
-		return plan, nil
+	defined := chartKinds(ch)
+	if len(defined) > 0 {
+		names := make([]string, 0, len(defined))
+		for gk := range defined {
+			names = append(names, gk.Kind)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			plan.Objects = append(plan.Objects, PlanObject{Kind: "CustomResourceDefinition", Name: n})
+		}
+		if upgrade {
+			plan.warn("the chart brings resource definitions (%s) — cluster-wide; an upgrade does not change them or add new ones",
+				strings.Join(names, ", "))
+		} else {
+			plan.warn("the chart brings resource definitions (%s) — cluster-wide, shared by every namespace, and left behind by an uninstall",
+				strings.Join(names, ", "))
+		}
 	}
 
 	cfg, _, err := m.helmActionConfig("", namespace)
@@ -153,6 +169,11 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		i.Namespace, i.ReleaseName = namespace, name
 		i.DryRun, i.DryRunOption = true, "server"
 		rel, err = i.RunWithContext(ctx, ch, vals)
+	}
+	if err != nil && len(defined) > 0 {
+		// The cluster cannot check objects of kinds the chart has not
+		// defined yet; render it without the cluster instead.
+		rel, err = m.renderOffline(namespace, name, ch, vals)
 	}
 	if err != nil {
 		plan.fail("the chart does not render with these values: %s", trimHelmError(err))
@@ -188,32 +209,73 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		if len(obj) == 0 {
 			continue
 		}
-		checkObject(plan, mapper, namespace, &unstructured.Unstructured{Object: obj}, mf.hook)
+		checkObject(plan, mapper, defined, namespace, &unstructured.Unstructured{Object: obj}, mf.hook)
 	}
 	sort.SliceStable(plan.Objects, func(i, j int) bool { return plan.Objects[i].Kind < plan.Objects[j].Kind })
 	plan.Images = uniqStrings(plan.Images)
 	return plan, nil
 }
 
-// checkObject adds one rendered object to the plan, and whatever is wrong
-// with it.
-func checkObject(plan *ReleasePlan, mapper meta.RESTMapper, namespace string, u *unstructured.Unstructured, hook bool) {
+// renderOffline renders a chart the way helm template does, without asking the
+// cluster — for a chart whose objects are of kinds it brings itself.
+func (m *Manager) renderOffline(namespace, name string, ch *chart.Chart, vals map[string]any) (*release.Release, error) {
+	cfg, _, err := m.helmActionConfig("", namespace)
+	if err != nil {
+		return nil, err
+	}
+	i := action.NewInstall(cfg)
+	i.Namespace, i.ReleaseName = namespace, name
+	i.DryRun, i.DryRunOption, i.ClientOnly = true, "client", true
+	return i.Run(ch, vals)
+}
+
+// chartKinds are the kinds a chart defines in its crds/ directories, each
+// with whether it is cluster-wide.
+func chartKinds(ch *chart.Chart) map[schema.GroupKind]bool {
+	out := map[schema.GroupKind]bool{}
+	for _, crd := range ch.CRDObjects() {
+		for _, text := range releaseutil.SplitManifests(string(crd.File.Data)) {
+			var d struct {
+				Kind string `json:"kind"`
+				Spec struct {
+					Group string `json:"group"`
+					Scope string `json:"scope"`
+					Names struct {
+						Kind string `json:"kind"`
+					} `json:"names"`
+				} `json:"spec"`
+			}
+			if yaml.Unmarshal([]byte(text), &d) != nil || d.Kind != "CustomResourceDefinition" || d.Spec.Names.Kind == "" {
+				continue
+			}
+			out[schema.GroupKind{Group: d.Spec.Group, Kind: d.Spec.Names.Kind}] = d.Spec.Scope == "Cluster"
+		}
+	}
+	return out
+}
+
+// checkObject adds one rendered object to the plan, and a warning for
+// whatever reaches past the namespace. defined are the kinds the chart brings
+// itself, each with whether it is cluster-wide.
+func checkObject(plan *ReleasePlan, mapper meta.RESTMapper, defined map[schema.GroupKind]bool, namespace string, u *unstructured.Unstructured, hook bool) {
 	kind, name := u.GetKind(), u.GetName()
 	what := kind + " " + name
 	plan.Objects = append(plan.Objects, PlanObject{Kind: kind, Name: name, Hook: hook})
 
 	gvk := u.GroupVersionKind()
-	mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-	switch {
-	case err != nil:
-		plan.fail("%s: the cluster has no kind %s (%s)", what, kind, u.GetAPIVersion())
-		return
-	case mapping.Scope.Name() == meta.RESTScopeNameRoot:
-		plan.fail("%s is cluster-wide — the catalog installs only into this namespace", what)
-		return
+	clusterWide, ok := defined[gvk.GroupKind()]
+	if !ok {
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			plan.fail("%s: the cluster has no kind %s (%s), and the chart does not define it", what, kind, u.GetAPIVersion())
+			return
+		}
+		clusterWide = mapping.Scope.Name() == meta.RESTScopeNameRoot
 	}
-	if ns := u.GetNamespace(); ns != "" && ns != namespace {
-		plan.fail("%s goes into namespace %s — the catalog installs only into %s", what, ns, namespace)
+	if clusterWide {
+		plan.warn("%s is cluster-wide — not inside %s, it affects the whole cluster", what, namespace)
+	} else if ns := u.GetNamespace(); ns != "" && ns != namespace {
+		plan.warn("%s goes into another namespace, %s", what, ns)
 	}
 
 	switch kind {
@@ -221,7 +283,11 @@ func checkObject(plan *ReleasePlan, mapper meta.RESTMapper, namespace string, u 
 		ref, _, _ := unstructured.NestedString(u.Object, "roleRef", "name")
 		refKind, _, _ := unstructured.NestedString(u.Object, "roleRef", "kind")
 		if refKind == "ClusterRole" && (ref == "cluster-admin" || ref == "admin" || ref == "edit") {
-			plan.fail("%s grants the cluster role %s", what, ref)
+			plan.warn("%s grants the cluster role %s", what, ref)
+		}
+	case "ClusterRoleBinding":
+		if ref, _, _ := unstructured.NestedString(u.Object, "roleRef", "name"); ref == "cluster-admin" {
+			plan.warn("%s makes its subjects cluster administrators", what)
 		}
 	case "Service":
 		t, _, _ := unstructured.NestedString(u.Object, "spec", "type")
@@ -232,11 +298,11 @@ func checkObject(plan *ReleasePlan, mapper meta.RESTMapper, namespace string, u 
 
 	if spec := podSpecOf(u); spec != nil {
 		if why := nodeAccess(spec); why != "" {
-			plan.fail("%s: %s", what, why)
+			plan.warn("%s: %s", what, why)
 		}
 		for _, c := range spec.InitContainers {
 			if sc := c.SecurityContext; sc != nil && sc.Privileged != nil && *sc.Privileged {
-				plan.fail("%s: init container %s is privileged", what, c.Name)
+				plan.warn("%s: init container %s is privileged", what, c.Name)
 			}
 		}
 		for _, c := range append(append([]corev1.Container{}, spec.InitContainers...), spec.Containers...) {

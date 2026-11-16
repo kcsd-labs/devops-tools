@@ -224,8 +224,9 @@ exec:
 # (verified publishers only); each chart is fetched from wherever its author
 # publishes it. Developers holding helm-install or helm-upgrade send a request,
 # and an administrator (user-manage) approves it — or installs directly. A
-# chart is rendered and checked first: nothing cluster-wide, nothing in another
-# namespace, no privileged pods, images that exist. Needs rbac.fullAccess: the
+# chart is rendered and checked first, and what reaches past the namespace —
+# cluster-wide objects, resource definitions, privileged pods, images not
+# found — is shown as a warning to whoever approves. Needs rbac.fullAccess: the
 # portal's own account installs whatever the chart holds.
 catalog:
   enabled: true

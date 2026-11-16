@@ -459,8 +459,8 @@ func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDige
 		for _, st := range res.ImageStates {
 			switch {
 			case st.Missing:
-				plan.Problems = append(plan.Problems, kube.PlanProblem{Level: "error",
-					Text: "image " + st.Image + " is not in its registry — the pods would never start"})
+				plan.Problems = append(plan.Problems, kube.PlanProblem{Level: "warn",
+					Text: "image " + st.Image + " was not found in its registry — unless the nodes pull it from a mirror, the pods will not start"})
 			case st.Unknown != "":
 				plan.Problems = append(plan.Problems, kube.PlanProblem{Level: "warn",
 					Text: "image " + st.Image + " could not be checked: " + st.Unknown})

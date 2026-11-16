@@ -70,12 +70,13 @@ export function CheckResult({
   return (
     <div className={"cat-check" + (checking ? " stale" : "")}>
       {check.ok ? (
-        <div className="ing-check ok">
-          ✓ Check passed · {upgrade ? "the release will hold" : "will create"} {objectSummary(check.objects) || "nothing"}
-          {check.imageStates.length > 0 && ` · ${found}/${check.imageStates.length} images found`} · nothing cluster-wide
+        <div className={"ing-check " + (warns.length > 0 ? "warn" : "ok")}>
+          {warns.length > 0 ? "⚠ Can be installed" : "✓ Check passed"} ·{upgrade ? "the release will hold" : "will create"} {objectSummary(check.objects) || "nothing"}
+          {check.imageStates.length > 0 && ` · ${found}/${check.imageStates.length} images found`}
+          {warns.length > 0 && ` · ${warns.length} ${warns.length === 1 ? "warning" : "warnings"} below, for whoever approves`}
         </div>
       ) : (
-        <div className="ing-check err">✕ The check did not pass — nothing can be installed until this is fixed</div>
+        <div className="ing-check err">✕ This cannot be installed as it is</div>
       )}
       {[...errors, ...warns].map((p, i) => (
         <div key={i} className={"cat-problem " + p.level}>
