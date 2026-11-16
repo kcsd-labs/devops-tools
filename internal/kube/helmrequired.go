@@ -24,6 +24,9 @@ var (
 		regexp.MustCompile(`(?i)(?:a )?value for ['"\x60]?([A-Za-z][\w-]*(?:\.[\w-]+)*)['"\x60]? (?:is|must be) (?:required|set|provided)`),
 		regexp.MustCompile(`(?i)['"\x60]?([A-Za-z][\w-]*(?:\.[\w-]+)+)['"\x60]? (?:is|are) (?:required|mandatory)`),
 	}
+	// A template reading a key under a map the values do not have:
+	// "at <.Values.db.password.secret>: nil pointer evaluating".
+	nilMapRE = regexp.MustCompile(`at <\$?\.Values\.([A-Za-z][\w.-]*)>: nil pointer evaluating`)
 	// The schema, as Helm 3.18 and later word it:
 	// "- at '/auth': missing property 'password'".
 	schemaAtRE = regexp.MustCompile(`at '([^']*)': missing propert(?:y|ies) ((?:'[^']+'(?:,\s*)?)+)`)
@@ -84,6 +87,10 @@ func requiredValues(msg, top string) []RequiredValue {
 				key = p + "." + key
 			}
 			add(key, "the chart's schema needs it")
+			continue
+		}
+		if m := nilMapRE.FindStringSubmatch(line); m != nil {
+			add(m[1], "The chart reads it, and the values do not have the block it sits in.")
 			continue
 		}
 		for _, re := range requiredREs {

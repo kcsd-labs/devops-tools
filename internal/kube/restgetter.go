@@ -14,6 +14,8 @@ import (
 type restClientGetter struct {
 	namespace string
 	config    *rest.Config
+	// disc, when set, is a discovery shared between getters.
+	disc discovery.CachedDiscoveryInterface
 }
 
 func newRESTClientGetter(cfg *rest.Config, namespace string) *restClientGetter {
@@ -25,6 +27,9 @@ func (g *restClientGetter) ToRESTConfig() (*rest.Config, error) {
 }
 
 func (g *restClientGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
+	if g.disc != nil {
+		return g.disc, nil
+	}
 	dc, err := discovery.NewDiscoveryClientForConfig(g.config)
 	if err != nil {
 		return nil, err

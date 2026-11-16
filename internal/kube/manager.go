@@ -18,6 +18,8 @@ import (
 type Manager struct {
 	config        *rest.Config
 	impersonation config.ImpersonationConfig
+	// disc keeps the cluster's kinds as the portal's own account reads them.
+	disc discoveryCache
 }
 
 // NewManager connects either in-cluster, using the pod's ServiceAccount, or

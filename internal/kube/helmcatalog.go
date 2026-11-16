@@ -105,6 +105,9 @@ type ReleasePlan struct {
 	// Refusal is what the chart said when it would not render, in its
 	// own words, one point each.
 	Refusal *Refusal `json:"refusal,omitempty"`
+
+	// unknownKind: an object of a kind the cluster was not known to have.
+	unknownKind bool
 }
 
 // Refusal is a chart's own reasons for not rendering, and where it said so.
@@ -177,6 +180,7 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		rel, err := m.renderOffline(namespace, name, ch, vals)
 		if err != nil {
 			plan.notRendered(err, ch)
+			m.askAllAtOnce(plan, namespace, name, ch, vals)
 			return plan, nil
 		}
 		return m.finishPlan(plan, rel, defined, namespace)
@@ -200,18 +204,14 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		return plan, nil
 	}
 
-	var rel *release.Release
-	if upgrade {
-		u := action.NewUpgrade(cfg)
-		u.Namespace = namespace
-		u.DryRun, u.DryRunOption = true, "server"
-		u.ResetValues = true
-		rel, err = u.RunWithContext(ctx, name, ch, vals)
-	} else {
-		i := action.NewInstall(cfg)
-		i.Namespace, i.ReleaseName = namespace, name
-		i.DryRun, i.DryRunOption = true, "server"
-		rel, err = i.RunWithContext(ctx, ch, vals)
+	rel, err := m.dryRun(ctx, cfg, namespace, name, ch, vals, upgrade)
+	if err != nil && staleKinds(err) {
+		// A kind the kept list of the cluster's kinds does not have yet.
+		m.forgetDiscovery()
+		if cfg, _, err = m.helmActionConfig("", namespace); err != nil {
+			return nil, err
+		}
+		rel, err = m.dryRun(ctx, cfg, namespace, name, ch, vals, upgrade)
 	}
 	if err != nil && len(defined) > 0 {
 		// The cluster cannot check objects of kinds the chart has not
@@ -220,9 +220,112 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 	}
 	if err != nil {
 		plan.notRendered(err, ch)
+		m.askAllAtOnce(plan, namespace, name, ch, vals)
 		return plan, nil
 	}
 	return m.finishPlan(plan, rel, defined, namespace)
+}
+
+// staleKinds says whether a render failed on a kind the cluster was not
+// known to have.
+func staleKinds(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "no matches for kind") || strings.Contains(msg, "resource mapping not found")
+}
+
+// dryRun renders a release against the cluster without installing it.
+func (m *Manager) dryRun(ctx context.Context, cfg *action.Configuration, namespace, name string, ch *chart.Chart,
+	vals map[string]any, upgrade bool) (*release.Release, error) {
+	if upgrade {
+		u := action.NewUpgrade(cfg)
+		u.Namespace = namespace
+		u.DryRun, u.DryRunOption = true, "server"
+		// The cluster's schema is read when the release is installed; for
+		// a plan, the kinds below are enough, and much quicker.
+		u.DisableOpenAPIValidation = true
+		u.ResetValues = true
+		return u.RunWithContext(ctx, name, ch, vals)
+	}
+	i := action.NewInstall(cfg)
+	i.Namespace, i.ReleaseName = namespace, name
+	i.DryRun, i.DryRunOption = true, "server"
+	i.DisableOpenAPIValidation = true
+	return i.RunWithContext(ctx, ch, vals)
+}
+
+// probeRounds bounds how many keys in a row a chart is asked about.
+const probeRounds = 8
+
+// askAllAtOnce finds every key a chart will ask for, not only the first: a
+// chart stops at the first value it lacks, so each one found is given a
+// stand-in and the chart rendered again, without the cluster, until it asks
+// for nothing new. Whoever installs then fills them in one go instead of one
+// check at a time.
+func (m *Manager) askAllAtOnce(plan *ReleasePlan, namespace, name string, ch *chart.Chart, vals map[string]any) {
+	if len(plan.Required) == 0 {
+		return
+	}
+	probe, err := copyValues(vals)
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	said := map[string]bool{}
+	for _, msg := range plan.Refusal.Messages {
+		said[msg] = true
+	}
+	fresh := plan.Required
+	for round := 0; round < probeRounds && len(fresh) > 0; round++ {
+		for _, r := range fresh {
+			seen[r.Key] = true
+			setValuePath(probe, r.Key, "x")
+		}
+		_, err := m.renderOffline(namespace, name, ch, probe)
+		if err == nil {
+			return
+		}
+		fresh = nil
+		for _, r := range requiredValues(err.Error(), ch.Metadata.Name) {
+			if !seen[r.Key] {
+				fresh = append(fresh, r)
+				plan.Required = append(plan.Required, r)
+			}
+		}
+		for _, msg := range parseRefusal(err.Error()).Messages {
+			if !said[msg] && len(fresh) > 0 {
+				said[msg] = true
+				plan.Refusal.Messages = append(plan.Refusal.Messages, msg)
+			}
+		}
+	}
+}
+
+// copyValues copies values deeply, so a probe does not touch the real ones.
+func copyValues(vals map[string]any) (map[string]any, error) {
+	raw, err := yaml.Marshal(vals)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// setValuePath sets a.b.c in values, making the maps on the way and
+// replacing whatever is not one.
+func setValuePath(m map[string]any, path string, v any) {
+	parts := strings.Split(path, ".")
+	for _, p := range parts[:len(parts)-1] {
+		next, ok := m[p].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			m[p] = next
+		}
+		m = next
+	}
+	m[parts[len(parts)-1]] = v
 }
 
 // notRendered records why a chart did not render, and the values it named
@@ -238,10 +341,31 @@ func (m *Manager) finishPlan(plan *ReleasePlan, rel *release.Release, defined ma
 	if rel.Info != nil {
 		plan.Notes = shorten(strings.TrimSpace(rel.Info.Notes), 4000)
 	}
-	mapper, err := newRESTClientGetter(m.restConfig(""), namespace).ToRESTMapper()
-	if err != nil {
-		return nil, fmt.Errorf("read the cluster's kinds: %w", err)
+	// Checked against the kept list of the cluster's kinds; a kind it lacks
+	// sends the check round once more, with a fresh list.
+	base := *plan
+	base.Objects = append([]PlanObject{}, plan.Objects...)
+	base.Problems = append([]PlanProblem{}, plan.Problems...)
+	base.Images = append([]string{}, plan.Images...)
+	for attempt := 0; ; attempt++ {
+		mapper, err := m.portalGetter(namespace).ToRESTMapper()
+		if err != nil {
+			return nil, fmt.Errorf("read the cluster's kinds: %w", err)
+		}
+		m.checkManifests(plan, rel, mapper, defined, namespace)
+		if !plan.unknownKind || attempt > 0 {
+			return plan, nil
+		}
+		m.forgetDiscovery()
+		*plan = base
+		plan.Objects = append([]PlanObject{}, base.Objects...)
+		plan.Problems = append([]PlanProblem{}, base.Problems...)
+		plan.Images = append([]string{}, base.Images...)
 	}
+}
+
+// checkManifests checks each object of a rendered release.
+func (m *Manager) checkManifests(plan *ReleasePlan, rel *release.Release, mapper meta.RESTMapper, defined map[schema.GroupKind]bool, namespace string) {
 	manifests := []struct {
 		text string
 		hook bool
@@ -271,7 +395,6 @@ func (m *Manager) finishPlan(plan *ReleasePlan, rel *release.Release, defined ma
 	}
 	sort.SliceStable(plan.Objects, func(i, j int) bool { return plan.Objects[i].Kind < plan.Objects[j].Kind })
 	plan.Images = uniqStrings(plan.Images)
-	return plan, nil
 }
 
 // renderOffline renders a chart the way helm template does, without asking the
@@ -325,6 +448,7 @@ func checkObject(plan *ReleasePlan, mapper meta.RESTMapper, defined map[schema.G
 	if !ok {
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
+			plan.unknownKind = true
 			plan.fail("%s: the cluster has no kind %s (%s), and the chart does not define it", what, kind, u.GetAPIVersion())
 			return
 		}

@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -69,7 +70,22 @@ var ErrNotFound = errors.New("the catalog has no such chart")
 type Hub struct {
 	base string
 	http *http.Client
+	// located keeps where each version of a chart is, a while: every check
+	// of a chart asks, and a published version does not move.
+	mu      sync.Mutex
+	located map[string]locatedAt
 }
+
+type locatedAt struct {
+	loc *Located
+	at  time.Time
+}
+
+// A pinned version is kept longer than "the latest", which can change.
+const (
+	locatedTTL       = 30 * time.Minute
+	locatedLatestTTL = 2 * time.Minute
+)
 
 // NewHub reads the Artifact Hub at base, e.g. https://artifacthub.io.
 func NewHub(base string) *Hub {
@@ -112,6 +128,31 @@ func (h *Hub) Locate(ctx context.Context, repo, name, version string) (*Located,
 	if !validName(repo) || !validName(name) || (version != "" && !validVersion(version)) {
 		return nil, ErrNotFound
 	}
+	key := repo + "/" + name + "@" + version
+	ttl := locatedTTL
+	if version == "" {
+		ttl = locatedLatestTTL
+	}
+	h.mu.Lock()
+	if got, ok := h.located[key]; ok && time.Since(got.at) < ttl {
+		h.mu.Unlock()
+		return got.loc, nil
+	}
+	h.mu.Unlock()
+	loc, err := h.locate(ctx, repo, name, version)
+	if err != nil {
+		return nil, err
+	}
+	h.mu.Lock()
+	if h.located == nil || len(h.located) > 500 {
+		h.located = map[string]locatedAt{}
+	}
+	h.located[key] = locatedAt{loc, time.Now()}
+	h.mu.Unlock()
+	return loc, nil
+}
+
+func (h *Hub) locate(ctx context.Context, repo, name, version string) (*Located, error) {
 	p := "/api/v1/packages/helm/" + url.PathEscape(repo) + "/" + url.PathEscape(name)
 	if version != "" {
 		p += "/" + url.PathEscape(version)

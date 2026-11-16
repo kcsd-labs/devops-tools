@@ -89,6 +89,9 @@ func explain(err error, detail string) error {
 // log the action will narrate into.
 func (m *Manager) helmActionConfig(asUser, namespace string) (*action.Configuration, *helmLog, error) {
 	getter := newRESTClientGetter(m.restConfig(asUser), namespace)
+	if asUser == "" {
+		getter = m.portalGetter(namespace)
+	}
 	actionCfg := new(action.Configuration)
 	logs := &helmLog{}
 	// The "secret" driver keeps releases in namespace secrets — the Helm 3 default.

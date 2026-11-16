@@ -45,10 +45,17 @@ func CheckImages(ctx context.Context, images []string) []ImageState {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for im := range uniq {
+		if st, ok := imageAnswers.get(im); ok {
+			out = append(out, st)
+			continue
+		}
 		wg.Add(1)
 		go func(im string) {
 			defer wg.Done()
 			st := checkImage(ctx, client, im)
+			if st.Unknown == "" {
+				imageAnswers.put(im, st)
+			}
 			mu.Lock()
 			out = append(out, st)
 			mu.Unlock()
@@ -57,6 +64,42 @@ func CheckImages(ctx context.Context, images []string) []ImageState {
 	wg.Wait()
 	sort.Slice(out, func(i, j int) bool { return out[i].Image < out[j].Image })
 	return out
+}
+
+// imageAnswers are what registries said, kept a while: the same images are
+// asked about at every check of a chart, and an answer does not change by
+// the minute. What could not be asked is asked again.
+var imageAnswers = &answers{m: map[string]answer{}}
+
+const imageAnswerTTL = 15 * time.Minute
+
+type answer struct {
+	st ImageState
+	at time.Time
+}
+
+type answers struct {
+	mu sync.Mutex
+	m  map[string]answer
+}
+
+func (a *answers) get(image string) (ImageState, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	got, ok := a.m[image]
+	if !ok || time.Since(got.at) > imageAnswerTTL {
+		return ImageState{}, false
+	}
+	return got.st, true
+}
+
+func (a *answers) put(image string, st ImageState) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.m) > 2000 {
+		a.m = map[string]answer{}
+	}
+	a.m[image] = answer{st, time.Now()}
 }
 
 func checkImage(ctx context.Context, client *auth.Client, image string) ImageState {
