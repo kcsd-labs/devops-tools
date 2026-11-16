@@ -54,10 +54,12 @@ type Version struct {
 type Located struct {
 	Package
 	// ContentURL is the archive: https://… or oci://…
-	ContentURL string    `json:"-"`
-	RepoURL    string    `json:"repoUrl"`
-	Readme     string    `json:"readme,omitempty"`
-	Versions   []Version `json:"versions"`
+	ContentURL string `json:"-"`
+	RepoURL    string `json:"repoUrl"`
+	// Page is the chart's page on Artifact Hub.
+	Page     string    `json:"page"`
+	Readme   string    `json:"readme,omitempty"`
+	Versions []Version `json:"versions"`
 }
 
 // ErrNotFound says the catalog has no such chart or version.
@@ -125,6 +127,7 @@ func (h *Hub) Locate(ctx context.Context, repo, name, version string) (*Located,
 		Package:    body.toPackage(h.base),
 		ContentURL: body.ContentURL,
 		RepoURL:    body.Repository.URL,
+		Page:       h.base + "/packages/helm/" + url.PathEscape(repo) + "/" + url.PathEscape(name),
 		Readme:     body.Readme,
 		Versions:   make([]Version, 0, len(body.AvailableVersions)),
 	}

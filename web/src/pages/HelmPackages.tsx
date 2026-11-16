@@ -11,8 +11,10 @@ import { RequestStatus, requestLine, requestNote } from "../components/Catalog";
 // The namespace is picked here, as on Services, rather than reached through
 // the namespace list.
 
-// The install dialog carries the YAML editor; loaded when it is opened.
+// The install dialog carries the YAML editor, and the details a Markdown
+// renderer; each is loaded when it is opened.
 const ChartInstall = lazy(() => import("../components/ChartInstall").then((m) => ({ default: m.ChartInstall })));
+const ChartDetails = lazy(() => import("../components/ChartDetails").then((m) => ({ default: m.ChartDetails })));
 
 const NAMESPACE_KEY = "devops-tools.helmPackages.namespace";
 
@@ -45,6 +47,7 @@ export function HelmPackages() {
   const [error, setError] = useState("");
   const [access, setAccess] = useState<Access | null>(null);
   const [installing, setInstalling] = useState<Installing | null>(null);
+  const [details, setDetails] = useState<CatalogPackage | null>(null);
   const { dialogs, confirm, alertDlg } = useDialogs();
 
   // As on Services: the namespace in the address, else the one looked at
@@ -176,9 +179,24 @@ export function HelmPackages() {
         </Suspense>
       )}
 
+      {details && (
+        <Suspense fallback={null}>
+          <ChartDetails
+            namespace={namespace}
+            pkg={details}
+            onClose={() => setDetails(null)}
+            onInstall={() => {
+              setDetails(null);
+              setInstalling({ kind: "install", repo: details.repo, chart: details.name });
+            }}
+          />
+        </Suspense>
+      )}
+
       {namespace && access && view === "catalog" && (
         <CatalogList
           namespace={namespace}
+          onOpen={setDetails}
           onPick={(p) => setInstalling({ kind: "install", repo: p.repo, chart: p.name })}
         />
       )}
@@ -213,7 +231,15 @@ export function HelmPackages() {
 }
 
 /** The catalog: a search over Artifact Hub, a page at a time. */
-function CatalogList({ namespace, onPick }: { namespace: string; onPick: (p: CatalogPackage) => void }) {
+function CatalogList({
+  namespace,
+  onOpen,
+  onPick,
+}: {
+  namespace: string;
+  onOpen: (p: CatalogPackage) => void;
+  onPick: (p: CatalogPackage) => void;
+}) {
   const api = useApi();
   const [q, setQ] = useState("");
   const [shown, setShown] = useState("");
@@ -279,7 +305,15 @@ function CatalogList({ namespace, onPick }: { namespace: string; onPick: (p: Cat
       )}
       <div className="cat-list">
         {items.map((p) => (
-          <div className="cat-row" key={p.repo + "/" + p.name}>
+          <div
+            className="cat-row clickable"
+            key={p.repo + "/" + p.name}
+            role="button"
+            tabIndex={0}
+            title="Show what this chart is"
+            onClick={() => onOpen(p)}
+            onKeyDown={(e) => e.key === "Enter" && onOpen(p)}
+          >
             <div className="cat-logo-box">{p.logo ? <img src={p.logo} alt="" loading="lazy" /> : <span>⎈</span>}</div>
             <div className="cat-main">
               <div>
@@ -292,7 +326,13 @@ function CatalogList({ namespace, onPick }: { namespace: string; onPick: (p: Cat
                 {p.appVersion ? ` · app ${p.appVersion}` : ""} · ★ {p.stars}
               </div>
             </div>
-            <button className="btn sm" onClick={() => onPick(p)}>
+            <button
+              className="btn sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPick(p);
+              }}
+            >
               Install
             </button>
           </div>

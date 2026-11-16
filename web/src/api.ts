@@ -44,6 +44,8 @@ export interface CatalogPackage {
 /** One version of a chart, ready to fill in. */
 export interface CatalogChart extends CatalogPackage {
   repoUrl: string;
+  /** The chart's page on Artifact Hub. */
+  page?: string;
   readme?: string;
   versions: { version: string; appVersion?: string; prerelease?: boolean }[];
   digest: string;

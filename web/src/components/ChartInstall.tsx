@@ -5,6 +5,7 @@ import { useApi } from "../useApi";
 import { useEditorTheme } from "../editorTheme";
 import { CatalogError, type CatalogAsk, type CatalogChart, type CatalogCheck, type HelmRequest } from "../api";
 import { CheckResult } from "./Catalog";
+import { Markdown } from "./Markdown";
 
 type InstallProps = {
   namespace: string;
@@ -195,7 +196,11 @@ export function ChartInstall(props: InstallProps) {
               {tab === "defaults" && (
                 <CodeMirror value={info.defaults} theme={theme} height="290px" extensions={[yaml()]} editable={false} />
               )}
-              {tab === "readme" && <pre className="cat-readme">{info.readme || "The chart has no README."}</pre>}
+              {tab === "readme" && (
+                <div className="cat-readme cat-readme-md">
+                  {info.readme ? <Markdown source={info.readme} /> : "The chart has no README."}
+                </div>
+              )}
 
               <CheckResult check={check} checking={checking} error={checkError} upgrade={kind === "upgrade"} />
               {submitError && <div className="alert" style={{ marginTop: 10 }}>{submitError}</div>}

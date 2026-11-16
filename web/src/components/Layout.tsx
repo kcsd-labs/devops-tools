@@ -127,19 +127,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <span className="chev">›</span>
             </NavLink>
           )}
-          {/* Installing charts from the catalog, beside the other things a team
-              runs in its namespaces. */}
-          {canSeePackages && (
-            <NavLink
-              to="/helm-packages"
-              className={() =>
-                "nav-item" + (location.pathname.startsWith("/helm-packages") ? " active" : "")
-              }
-            >
-              <span>Helm Packages</span>
-              <span className="chev">›</span>
-            </NavLink>
-          )}
           {/* Only where the deployment manages configuration and the caller was
               granted a path in it: otherwise the page is an empty list, which
               reads as a fault rather than as an absence of access. */}
@@ -151,6 +138,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
               }
             >
               <span>Configurations</span>
+              <span className="chev">›</span>
+            </NavLink>
+          )}
+          {/* Installing charts from the catalog, beside the other things a team
+              runs in its namespaces. */}
+          {canSeePackages && (
+            <NavLink
+              to="/helm-packages"
+              className={() =>
+                "nav-item" + (location.pathname.startsWith("/helm-packages") ? " active" : "")
+              }
+            >
+              <span>Helm Packages</span>
               <span className="chev">›</span>
             </NavLink>
           )}

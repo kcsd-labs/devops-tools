@@ -72,7 +72,8 @@ func TestHubSearchAndLocate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loc.ContentURL != "oci://registry.example.com/charts/redis:21.2.3" || len(loc.Versions) != 2 || loc.Readme != "# Redis" {
+	if loc.ContentURL != "oci://registry.example.com/charts/redis:21.2.3" || len(loc.Versions) != 2 || loc.Readme != "# Redis" ||
+		loc.Page != hub.URL+"/packages/helm/bitnami/redis" {
 		t.Errorf("located = %+v", loc)
 	}
 	if _, err := h.Locate(context.Background(), "bitnami", "nope", "1.0.0"); err != ErrNotFound {
