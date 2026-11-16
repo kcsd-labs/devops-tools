@@ -111,3 +111,23 @@ func TestPodExecNeverInClosedNamespaces(t *testing.T) {
 		t.Error("closing kube-system to a shell should not close it to a grant naming it for logs")
 	}
 }
+
+// Installing a chart is closed where a shell is: whatever a chart's author
+// wrote runs with the portal's account.
+func TestHelmInstallNeverInClosedNamespaces(t *testing.T) {
+	a := withNamespaceGrants(
+		config.NamespaceGrant{Namespace: "*", Operations: []string{"*"}},
+		config.NamespaceGrant{Namespace: "devops-tools", Operations: []string{config.OpHelmInstall, config.OpHelmUpgrade}},
+	)
+	a.CloseToExec([]string{"kube-*", "default", "devops-tools"})
+	roles := []string{"admin"}
+
+	for _, op := range []string{config.OpHelmInstall, config.OpHelmUpgrade} {
+		if !a.Allowed(roles, "abs-dev", op) {
+			t.Errorf("%s on * should reach an ordinary namespace", op)
+		}
+		if a.Allowed(roles, "devops-tools", op) {
+			t.Errorf("%s should never be granted in the portal's namespace", op)
+		}
+	}
+}

@@ -23,6 +23,94 @@ export interface HelmRelease {
   chart: string;
   version: string;
   updated: string;
+  /** Where a release installed from the catalog came from. */
+  catalog?: { repo: string; chart: string };
+}
+
+/** One chart in the catalog. */
+export interface CatalogPackage {
+  repo: string;
+  repoTitle: string;
+  name: string;
+  description: string;
+  version: string;
+  appVersion?: string;
+  logo?: string;
+  stars: number;
+  official?: boolean;
+  deprecated?: boolean;
+}
+
+/** One version of a chart, ready to fill in. */
+export interface CatalogChart extends CatalogPackage {
+  repoUrl: string;
+  readme?: string;
+  versions: { version: string; appVersion?: string; prerelease?: boolean }[];
+  digest: string;
+  /** The chart's own values.yaml. */
+  defaults: string;
+  schema: boolean;
+  suggestedName: string;
+}
+
+export interface CatalogProblem {
+  level: "error" | "warn";
+  text: string;
+}
+
+/** What installing a chart with some values would do. */
+export interface CatalogCheck {
+  ok: boolean;
+  digest: string;
+  objects: { kind: string; name: string; hook?: boolean }[];
+  problems: CatalogProblem[];
+  images: string[];
+  imageStates: { image: string; missing?: boolean; unknown?: string }[];
+  fromVersion?: string;
+}
+
+export interface CatalogAsk {
+  kind: "install" | "upgrade";
+  release: string;
+  repo: string;
+  chart: string;
+  version: string;
+  values: string;
+}
+
+export interface HelmRequest {
+  id: string;
+  kind: "install" | "upgrade";
+  namespace: string;
+  release: string;
+  repo: string;
+  chart: string;
+  version: string;
+  fromVersion?: string;
+  digest: string;
+  values: string;
+  /** What was asked for, when an administrator changed the values. */
+  askedValues?: string;
+  objects?: string[];
+  requester: string;
+  created: string;
+  expires: string;
+  status: "waiting" | "installing" | "installed" | "failed" | "rejected" | "withdrawn" | "expired";
+  decider?: string;
+  decided?: string;
+  comment?: string;
+  detail?: string;
+}
+
+/** A failed catalog call: the server's own words, and the check when one failed. */
+export class CatalogError extends Error {
+  status: number;
+  check?: CatalogCheck;
+  constructor(status: number, message: string, check?: CatalogCheck) {
+    super(message);
+    this.status = status;
+    this.check = check;
+  }
 }
 
 /** Optional features, toggled by the deployment's configuration. */
@@ -43,6 +131,8 @@ export interface Capabilities {
   ingresses?: boolean;
   /** May take a snapshot of the access model, and put one back. */
   accessRestore: boolean;
+  /** Answers requests to install from the catalog. */
+  helmRequests?: boolean;
 }
 
 /** Where the access model lives, and how much of it there is. */
@@ -549,6 +639,31 @@ export function createApi(token: string | undefined) {
       })
     ).then((r) => r.json());
 
+  // The catalog answers its errors as {"error": …}, with the failed check
+  // beside it when that is the reason; both are worth showing as they are.
+  const catalogCall = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const res = await fetch(`/api${path}`, {
+      method,
+      headers: body === undefined ? headers : { ...headers, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (res.status === 401 || res.status === 403) await handle(res);
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = text;
+      let check: CatalogCheck | undefined;
+      try {
+        const j = JSON.parse(text);
+        msg = j.error ?? text;
+        check = j.check;
+      } catch {
+        /* not JSON: the text as it is */
+      }
+      throw new CatalogError(res.status, msg, check);
+    }
+    return res.json();
+  };
+
   return {
     me: () => getJSON<Me>("/me"),
     namespaces: () => getJSON<NamespaceList>("/namespaces"),
@@ -792,6 +907,40 @@ export function createApi(token: string | undefined) {
       delJSON<{ status: string; release: string; warning?: string }>(
         `/namespaces/${ns}/helm/releases/${name}`
       ),
+
+    catalogAccess: (ns: string) =>
+      catalogCall<{ install: boolean; upgrade: boolean; direct: boolean }>("GET", `/namespaces/${ns}/helm/catalog-access`),
+    catalogSearch: (ns: string, q: string, offset = 0) =>
+      catalogCall<{ packages: CatalogPackage[]; total: number }>(
+        "GET",
+        `/namespaces/${ns}/helm/catalog?q=${encodeURIComponent(q)}&offset=${offset}`
+      ),
+    catalogChart: (ns: string, repo: string, chart: string, version = "") =>
+      catalogCall<CatalogChart>(
+        "GET",
+        `/namespaces/${ns}/helm/catalog/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}` +
+          (version ? `?version=${encodeURIComponent(version)}` : "")
+      ),
+    catalogRelease: (ns: string, name: string) =>
+      catalogCall<{ origin: { repo: string; chart: string }; version: string; values: string }>(
+        "GET",
+        `/namespaces/${ns}/helm/releases/${encodeURIComponent(name)}/catalog`
+      ),
+    catalogCheck: (ns: string, ask: CatalogAsk) =>
+      catalogCall<CatalogCheck>("POST", `/namespaces/${ns}/helm/check`, ask),
+    catalogRequest: (ns: string, ask: CatalogAsk) =>
+      catalogCall<HelmRequest>("POST", `/namespaces/${ns}/helm/requests`, ask),
+    namespaceRequests: (ns: string) => catalogCall<HelmRequest[]>("GET", `/namespaces/${ns}/helm/requests`),
+    withdrawRequest: (ns: string, id: string) =>
+      catalogCall<HelmRequest>("DELETE", `/namespaces/${ns}/helm/requests/${id}`),
+    allRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/requests"),
+    requestCount: () => catalogCall<{ waiting: number }>("GET", "/helm/requests/count"),
+    checkRequest: (id: string, values: string) =>
+      catalogCall<CatalogCheck>("POST", `/helm/requests/${id}/check`, { values }),
+    approveRequest: (id: string, values: string) =>
+      catalogCall<HelmRequest>("POST", `/helm/requests/${id}/approve`, { values }),
+    rejectRequest: (id: string, comment: string) =>
+      catalogCall<HelmRequest>("POST", `/helm/requests/${id}/reject`, { comment }),
 
     secrets: (ns: string, includeSystem = false) =>
       getJSON<SecretSummary[]>(`/namespaces/${ns}/secrets${includeSystem ? "?system=true" : ""}`),

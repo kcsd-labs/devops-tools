@@ -49,6 +49,13 @@ const (
 	OpSecretUpdate        = "secret-update"
 	OpSecretDelete        = "secret-delete"
 
+	// Installing a chart from the catalog, and upgrading one installed from
+	// it. Holding these is asking: an administrator (user-manage) approves
+	// each request before anything is installed. Never in the cluster's own
+	// namespaces or the portal's.
+	OpHelmInstall = "helm-install"
+	OpHelmUpgrade = "helm-upgrade"
+
 	// ConfigMaps. Seeing one shows its values: unlike a secret's, they are not
 	// a secret, so there is no separate read.
 	OpConfigMapList   = "configmap-list"
@@ -104,7 +111,7 @@ func NamespaceOperations() []string {
 	return []string{
 		OpLogs, OpDescribe, OpMetrics, OpPodRestart, OpPodExec,
 		OpServiceList, OpServiceRequest, OpServiceRequestWrite,
-		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall,
+		OpHelmList, OpHelmHistory, OpHelmRollback, OpHelmUninstall, OpHelmInstall, OpHelmUpgrade,
 		OpSecretList, OpSecretRead, OpSecretCreate, OpSecretUpdate, OpSecretDelete,
 		OpConfigMapList, OpConfigMapCreate, OpConfigMapUpdate, OpConfigMapDelete,
 		OpIngressList, OpIngressCreate, OpIngressUpdate, OpIngressDelete,

@@ -12,6 +12,11 @@ auth:
   provider: local
   session:
     ttl: 8h
+catalog:
+  artifactHub: https://artifacthub.io
+  enabled: true
+  installTimeout: 5m
+  requestTTL: 168h
 cluster:
   hiddenNamespaces:
   - kube-*

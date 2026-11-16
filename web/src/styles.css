@@ -2852,3 +2852,145 @@ a.seg-btn {
   word-break: break-word;
   margin: 12px 0;
 }
+
+/* --- Helm catalog -------------------------------------------------------------
+   Charts from Artifact Hub, the dialog one is installed from, and the requests
+   an administrator answers. */
+
+.nav-count {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  background: var(--warn);
+  color: #1a1300;
+}
+.cat-search {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.cat-search .input {
+  max-width: 420px;
+}
+.cat-list {
+  display: flex;
+  flex-direction: column;
+}
+.cat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cat-row:last-child {
+  border-bottom: none;
+}
+.cat-main {
+  flex: 1;
+  min-width: 0;
+}
+.cat-desc-line {
+  margin-top: 3px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cat-failed {
+  color: var(--err);
+  font-size: 12px;
+  white-space: normal;
+}
+.cat-logo-box {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex: none;
+  color: var(--muted);
+}
+.cat-logo-box img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+.tag.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.modal.cat-install {
+  width: min(900px, 96vw);
+}
+.cat-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cat-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.cat-desc {
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+.cat-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.cat-tabs {
+  margin: 0 0 10px;
+}
+.cat-readme {
+  height: 290px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  margin: 6px 0 0;
+}
+.cat-check {
+  margin-top: 4px;
+}
+.cat-check.stale {
+  opacity: 0.6;
+}
+.ing-check.err {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+.ing-check.muted-box {
+  color: var(--muted);
+  background: var(--card);
+}
+.cat-problem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  margin: 6px 2px;
+}
+.cat-note {
+  margin-right: auto;
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .cat-fields {
+    grid-template-columns: 1fr;
+  }
+}

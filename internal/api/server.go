@@ -44,6 +44,8 @@ const (
 	OpHelmHistory         = config.OpHelmHistory
 	OpHelmRollback        = config.OpHelmRollback
 	OpHelmUninstall       = config.OpHelmUninstall
+	OpHelmInstall         = config.OpHelmInstall
+	OpHelmUpgrade         = config.OpHelmUpgrade
 	OpSecretList          = config.OpSecretList
 	OpSecretRead          = config.OpSecretRead
 	OpSecretCreate        = config.OpSecretCreate
@@ -96,6 +98,8 @@ type Server struct {
 	shells shellLimits
 	// openShell runs the shell; the cluster's own, but for tests.
 	openShell shellOpener
+	// catalog installs charts from Artifact Hub; nil when switched off.
+	catalog *catalog
 }
 
 func NewServer(
@@ -263,6 +267,7 @@ func (s *Server) Router() http.Handler {
 		r.Get(base+"/helm/releases/{name}/history", s.requireOp(OpHelmHistory, s.handleReleaseHistory))
 		r.Post(base+"/helm/releases/{name}/rollback", s.requireOp(OpHelmRollback, s.handleRollback))
 		r.Delete(base+"/helm/releases/{name}", s.requireOp(OpHelmUninstall, s.handleUninstall))
+		s.catalogRoutes(r, base)
 
 		// services
 		r.Get(base+"/services", s.requireOp(OpServiceList, s.handleServices))

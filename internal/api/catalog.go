@@ -1,0 +1,723 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"helm.sh/helm/v3/pkg/chart"
+	"sigs.k8s.io/yaml"
+
+	"devops-tools/internal/audit"
+	"devops-tools/internal/auth"
+	"devops-tools/internal/helmcat"
+	"devops-tools/internal/helmreq"
+	"devops-tools/internal/kube"
+)
+
+// The catalog: charts from Artifact Hub, installed into a namespace with an
+// administrator's approval — or straight away by an administrator.
+//
+// Approving is the global user-manage: the people who decide who may do what
+// are the ones who decide what runs. Everything a request carries is checked
+// again when it is approved, against a fresh copy of the chart that must be
+// the same archive the requester saw.
+
+// catalog is what the catalog endpoints need. Nil when it is switched off.
+type catalog struct {
+	hub      *helmcat.Hub
+	fetcher  *helmcat.Fetcher
+	requests helmreq.Store
+	// planner and installer are the cluster's own, but for tests.
+	planner   func(ctx context.Context, ns, name string, ch *chart.Chart, vals map[string]any, upgrade bool) (*kube.ReleasePlan, error)
+	installer func(ctx context.Context, r *helmreq.Request, ch *chart.Chart, vals map[string]any) error
+	images    func(ctx context.Context, images []string) []helmcat.ImageState
+	// fetch reads one version of a chart: where it is and the archive.
+	fetch func(ctx context.Context, repo, name, version string) (*helmcat.Located, *helmcat.Archive, error)
+	// current reads a release installed from the catalog; trouble says why
+	// its pods are not up; releases lists a namespace's release names.
+	current  func(ns, name string) (*kube.CatalogRelease, error)
+	trouble  func(ctx context.Context, ns, name string) string
+	releases func(ns string) ([]string, error)
+}
+
+// WithCatalog switches the catalog on.
+func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, requests helmreq.Store) *Server {
+	c := &catalog{hub: hub, fetcher: fetcher, requests: requests, images: helmcat.CheckImages}
+	c.planner = s.kube.PlanRelease
+	c.installer = s.runInstall
+	c.current = s.kube.GetCatalogRelease
+	c.trouble = s.kube.ReleaseTrouble
+	c.releases = func(ns string) ([]string, error) {
+		rels, err := s.kube.ListReleases("", ns)
+		names := make([]string, 0, len(rels))
+		for _, r := range rels {
+			names = append(names, r.Name)
+		}
+		return names, err
+	}
+	c.fetch = func(ctx context.Context, repo, name, version string) (*helmcat.Located, *helmcat.Archive, error) {
+		loc, err := hub.Locate(ctx, repo, name, version)
+		if err != nil {
+			return nil, nil, err
+		}
+		a, err := fetcher.Fetch(ctx, loc.ContentURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		return loc, a, nil
+	}
+	s.catalog = c
+	return s
+}
+
+func (s *Server) catalogRoutes(r chi.Router, base string) {
+	if s.catalog == nil {
+		return
+	}
+	r.Get(base+"/helm/catalog-access", s.requireOp(OpHelmList, s.handleCatalogAccess))
+	r.Get(base+"/helm/catalog", s.requireOp(OpHelmInstall, s.handleCatalogSearch))
+	r.Get(base+"/helm/catalog/{repo}/{chart}", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade}, s.handleCatalogChart))
+	r.Get(base+"/helm/releases/{name}/catalog", s.requireOp(OpHelmUpgrade, s.handleCatalogRelease))
+	r.Post(base+"/helm/check", s.handleCatalogCheck)
+	r.Get(base+"/helm/requests", s.requireOp(OpHelmList, s.handleNamespaceRequests))
+	r.Post(base+"/helm/requests", s.handleCreateRequest)
+	r.Delete(base+"/helm/requests/{id}", s.requireOp(OpHelmList, s.handleWithdrawRequest))
+
+	r.Get("/helm/requests", s.requireGlobalOp(OpUserManage, s.handleAllRequests))
+	r.Get("/helm/requests/count", s.requireGlobalOp(OpUserManage, s.handleRequestCount))
+	r.Post("/helm/requests/{id}/check", s.requireGlobalOp(OpUserManage, s.handleCheckRequest))
+	r.Post("/helm/requests/{id}/approve", s.requireGlobalOp(OpUserManage, s.handleApproveRequest))
+	r.Post("/helm/requests/{id}/reject", s.requireGlobalOp(OpUserManage, s.handleRejectRequest))
+}
+
+// requireAnyOp is requireOp for an endpoint either of two grants opens.
+func (s *Server) requireAnyOp(ops []string, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.FromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+			return
+		}
+		ns := chi.URLParam(r, "namespace")
+		for _, op := range ops {
+			if s.authz.Allowed(user.Roles, ns, op) {
+				handler(w, r)
+				return
+			}
+		}
+		s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
+			Operation: ops[0], Allowed: false})
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}
+}
+
+func (s *Server) isApprover(roles []string) bool { return s.authz.AllowedGlobal(roles, OpUserManage) }
+
+func (s *Server) handleCatalogAccess(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	ns := chi.URLParam(r, "namespace")
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"install": s.authz.Allowed(user.Roles, ns, OpHelmInstall),
+		"upgrade": s.authz.Allowed(user.Roles, ns, OpHelmUpgrade),
+		// An administrator's install needs no request.
+		"direct": s.isApprover(user.Roles),
+	})
+}
+
+func (s *Server) handleCatalogSearch(w http.ResponseWriter, r *http.Request) {
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	page, err := s.catalog.hub.Search(r.Context(), r.URL.Query().Get("q"), offset)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// chartInfo is one version of a chart, ready to fill in.
+type chartInfo struct {
+	*helmcat.Located
+	Digest   string `json:"digest"`
+	Defaults string `json:"defaults"`
+	Schema   bool   `json:"schema"`
+	// SuggestedName is a release name free in the namespace.
+	SuggestedName string `json:"suggestedName"`
+}
+
+func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "namespace")
+	loc, arc, err := s.catalog.fetch(r.Context(), chi.URLParam(r, "repo"), chi.URLParam(r, "chart"), r.URL.Query().Get("version"))
+	if err != nil {
+		catalogError(w, err)
+		return
+	}
+	info := chartInfo{Located: loc, Digest: arc.Digest, Schema: len(arc.Chart.Schema) > 0}
+	for _, f := range arc.Chart.Raw {
+		if f.Name == "values.yaml" {
+			info.Defaults = string(f.Data)
+		}
+	}
+	info.SuggestedName = s.freeReleaseName(ns, loc.Name)
+	writeJSON(w, http.StatusOK, info)
+}
+
+// freeReleaseName is name, or name-2, name-3… — the first not taken in ns.
+func (s *Server) freeReleaseName(ns, name string) string {
+	names, err := s.catalog.releases(ns)
+	if err != nil {
+		return name
+	}
+	taken := map[string]bool{}
+	for _, n := range names {
+		taken[n] = true
+	}
+	for i := 1; ; i++ {
+		n := name
+		if i > 1 {
+			n = name + "-" + strconv.Itoa(i)
+		}
+		if !taken[n] {
+			return n
+		}
+	}
+}
+
+func (s *Server) handleCatalogRelease(w http.ResponseWriter, r *http.Request) {
+	ns, name := chi.URLParam(r, "namespace"), chi.URLParam(r, "name")
+	rel, err := s.catalog.current(ns, name)
+	if errors.Is(err, kube.ErrNotFromCatalog) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, rel)
+}
+
+// catalogAsk is what a check or a request carries.
+type catalogAsk struct {
+	Kind    string `json:"kind"`
+	Release string `json:"release"`
+	Repo    string `json:"repo"`
+	Chart   string `json:"chart"`
+	Version string `json:"version"`
+	Values  string `json:"values"`
+}
+
+// checkResult is a plan, with what the registries said about its images.
+type checkResult struct {
+	*kube.ReleasePlan
+	OK          bool                 `json:"ok"`
+	Digest      string               `json:"digest"`
+	ImageStates []helmcat.ImageState `json:"imageStates"`
+	FromVersion string               `json:"fromVersion,omitempty"`
+}
+
+var releaseNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$`)
+
+// readAsk reads and checks a request body, and answers the caller itself when
+// it is not one to act on.
+func (s *Server) readAsk(w http.ResponseWriter, r *http.Request) (*catalogAsk, bool) {
+	user, _ := auth.FromContext(r.Context())
+	ns := chi.URLParam(r, "namespace")
+	var ask catalogAsk
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&ask); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request does not read: " + err.Error()})
+		return nil, false
+	}
+	op := OpHelmInstall
+	switch ask.Kind {
+	case helmreq.KindInstall:
+	case helmreq.KindUpgrade:
+		op = OpHelmUpgrade
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind is install or upgrade"})
+		return nil, false
+	}
+	if !s.authz.Allowed(user.Roles, ns, op) {
+		s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
+			Operation: op, Target: ask.Release, Allowed: false})
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return nil, false
+	}
+	if !releaseNameRE.MatchString(ask.Release) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a release name is lower-case letters, digits and dashes, at most 53 long"})
+		return nil, false
+	}
+	return &ask, true
+}
+
+// parseValues reads values written as YAML.
+func parseValues(text string) (map[string]any, error) {
+	vals := map[string]any{}
+	if strings.TrimSpace(text) == "" {
+		return vals, nil
+	}
+	if err := yaml.Unmarshal([]byte(text), &vals); err != nil {
+		return nil, fmt.Errorf("the values are not YAML: %w", err)
+	}
+	if vals == nil {
+		vals = map[string]any{}
+	}
+	return vals, nil
+}
+
+// check plans an ask: fetches the chart, renders it, and asks the registries
+// about its images. wantDigest, when set, is the archive that must be fetched.
+func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDigest string) (*checkResult, *chart.Chart, map[string]any, error) {
+	vals, err := parseValues(ask.Values)
+	if err != nil {
+		return nil, nil, nil, askError{err}
+	}
+	_, arc, err := s.catalog.fetch(ctx, ask.Repo, ask.Chart, ask.Version)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if wantDigest != "" && arc.Digest != wantDigest {
+		return nil, nil, nil, askError{fmt.Errorf("the chart %s %s is no longer the archive that was requested — its author replaced it; ask again",
+			ask.Chart, ask.Version)}
+	}
+	upgrade := ask.Kind == helmreq.KindUpgrade
+	res := &checkResult{Digest: arc.Digest, ImageStates: []helmcat.ImageState{}}
+	if upgrade {
+		cur, err := s.catalog.current(ns, ask.Release)
+		if errors.Is(err, kube.ErrNotFromCatalog) {
+			return nil, nil, nil, askError{err}
+		}
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if cur.Origin.Repo != ask.Repo || cur.Origin.Chart != ask.Chart {
+			return nil, nil, nil, askError{fmt.Errorf("%s was installed from %s/%s, not %s/%s",
+				ask.Release, cur.Origin.Repo, cur.Origin.Chart, ask.Repo, ask.Chart)}
+		}
+		res.FromVersion = cur.Version
+	}
+	plan, err := s.catalog.planner(ctx, ns, ask.Release, arc.Chart, vals, upgrade)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	res.ReleasePlan = plan
+	if plan.OK() && len(plan.Images) > 0 {
+		res.ImageStates = s.catalog.images(ctx, plan.Images)
+		for _, st := range res.ImageStates {
+			switch {
+			case st.Missing:
+				plan.Problems = append(plan.Problems, kube.PlanProblem{Level: "error",
+					Text: "image " + st.Image + " is not in its registry — the pods would never start"})
+			case st.Unknown != "":
+				plan.Problems = append(plan.Problems, kube.PlanProblem{Level: "warn",
+					Text: "image " + st.Image + " could not be checked: " + st.Unknown})
+			}
+		}
+	}
+	res.OK = plan.OK()
+	return res, arc.Chart, vals, nil
+}
+
+func (s *Server) handleCatalogCheck(w http.ResponseWriter, r *http.Request) {
+	ask, ok := s.readAsk(w, r)
+	if !ok {
+		return
+	}
+	res, _, _, err := s.check(r.Context(), chi.URLParam(r, "namespace"), ask, "")
+	if err != nil {
+		catalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func objectList(p *kube.ReleasePlan) []string {
+	counts := map[string]int{}
+	var kinds []string
+	for _, o := range p.Objects {
+		if counts[o.Kind] == 0 {
+			kinds = append(kinds, o.Kind)
+		}
+		counts[o.Kind]++
+	}
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		if counts[k] > 1 {
+			out = append(out, fmt.Sprintf("%s ×%d", k, counts[k]))
+		} else {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	ns := chi.URLParam(r, "namespace")
+	ask, ok := s.readAsk(w, r)
+	if !ok {
+		return
+	}
+	res, ch, vals, err := s.check(r.Context(), ns, ask, "")
+	if err != nil {
+		catalogError(w, err)
+		return
+	}
+	if !res.OK {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "the check did not pass", "check": res})
+		return
+	}
+	// Nothing else waiting for the same release: two requests for one name
+	// would install twice, or upgrade over each other.
+	if open := s.openRequestFor(r.Context(), ns, ask.Release); open != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": fmt.Sprintf("%s already has a request waiting, from %s", ask.Release, open.Requester)})
+		return
+	}
+
+	now := time.Now().UTC()
+	req := &helmreq.Request{
+		Kind: ask.Kind, Namespace: ns, Release: ask.Release,
+		Repo: ask.Repo, Chart: ask.Chart, Version: ask.Version, FromVersion: res.FromVersion,
+		Digest: res.Digest, Values: ask.Values, Objects: objectList(res.ReleasePlan),
+		Requester: user.Username, Created: now, Expires: now.Add(s.cfg.Catalog.RequestTTL),
+		Status: helmreq.StatusWaiting,
+	}
+	direct := s.isApprover(user.Roles)
+	if direct {
+		req.Status, req.Decider, req.Decided = helmreq.StatusInstalling, user.Username, &now
+	}
+	if err := s.catalog.requests.Create(r.Context(), req); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	op := "helm-" + ask.Kind + "-request"
+	if direct {
+		op = "helm-" + ask.Kind
+	}
+	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
+		Operation: op, Target: ask.Release, Allowed: true, Success: true, Detail: requestDetail(req, vals)})
+	if direct {
+		s.startInstall(req, ch, vals)
+	}
+	writeJSON(w, http.StatusCreated, req)
+}
+
+func (s *Server) openRequestFor(ctx context.Context, ns, release string) *helmreq.Request {
+	all, err := s.catalog.requests.List(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, q := range all {
+		if q.Namespace == ns && q.Release == release && (q.Status == helmreq.StatusWaiting || q.Status == helmreq.StatusInstalling) {
+			return q
+		}
+	}
+	return nil
+}
+
+// requestDetail is the audit line for a request: the chart, and which values
+// were set — names only.
+func requestDetail(q *helmreq.Request, vals map[string]any) string {
+	d := q.Chart + " " + q.Version + " from " + q.Repo
+	if q.FromVersion != "" {
+		d = q.Chart + " " + q.FromVersion + " → " + q.Version + " from " + q.Repo
+	}
+	if keys := valueKeys(vals); len(keys) > 0 {
+		d += "; values: " + strings.Join(keys, ", ")
+	}
+	return d
+}
+
+// valueKeys names the leaves of a values document, a.b.c, at most a dozen.
+func valueKeys(vals map[string]any) []string {
+	var out []string
+	var walk func(prefix string, v any)
+	walk = func(prefix string, v any) {
+		m, ok := v.(map[string]any)
+		if !ok || len(m) == 0 {
+			out = append(out, prefix)
+			return
+		}
+		for k, sub := range m {
+			p := k
+			if prefix != "" {
+				p = prefix + "." + k
+			}
+			walk(p, sub)
+		}
+	}
+	for k, v := range vals {
+		walk(k, v)
+	}
+	sort.Strings(out)
+	if len(out) > 12 {
+		out = append(out[:12], fmt.Sprintf("and %d more", len(out)-12))
+	}
+	return out
+}
+
+func (s *Server) handleNamespaceRequests(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "namespace")
+	all, err := s.catalog.requests.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := []*helmreq.Request{}
+	for _, q := range all {
+		if q.Namespace == ns {
+			out = append(out, q)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleWithdrawRequest(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	ns, id := chi.URLParam(r, "namespace"), chi.URLParam(r, "id")
+	q, err := s.catalog.requests.Update(r.Context(), id, func(q *helmreq.Request) error {
+		if q.Namespace != ns {
+			return helmreq.ErrNotFound
+		}
+		if q.Requester != user.Username && !s.isApprover(user.Roles) {
+			return errForbidden
+		}
+		if !q.Open() {
+			return fmt.Errorf("the request is already %s", q.Status)
+		}
+		now := time.Now().UTC()
+		q.Status, q.Decider, q.Decided = helmreq.StatusWithdrawn, user.Username, &now
+		return nil
+	})
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
+		Operation: "helm-request-withdraw", Target: q.Release, Allowed: true, Success: true,
+		Detail: q.Chart + " " + q.Version})
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) handleAllRequests(w http.ResponseWriter, r *http.Request) {
+	all, err := s.catalog.requests.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, all)
+}
+
+func (s *Server) handleRequestCount(w http.ResponseWriter, r *http.Request) {
+	all, err := s.catalog.requests.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	n := 0
+	for _, q := range all {
+		if q.Open() {
+			n++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"waiting": n})
+}
+
+// handleCheckRequest runs a request's check again for whoever answers it, with
+// the values they are about to approve. Theirs to run whether or not they hold
+// anything in the namespace: answering is the grant.
+func (s *Server) handleCheckRequest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Values *string `json:"values"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request does not read: " + err.Error()})
+		return
+	}
+	q, err := s.catalog.requests.Get(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values}
+	if body.Values != nil {
+		ask.Values = *body.Values
+	}
+	res, _, _, err := s.check(r.Context(), q.Namespace, ask, q.Digest)
+	if err != nil {
+		catalogError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Values *string `json:"values"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request does not read: " + err.Error()})
+		return
+	}
+	q, err := s.catalog.requests.Get(r.Context(), id)
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	if !q.Open() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "the request is already " + q.Status})
+		return
+	}
+	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values}
+	changed := body.Values != nil && strings.TrimSpace(*body.Values) != strings.TrimSpace(q.Values)
+	if changed {
+		ask.Values = *body.Values
+	}
+	// Checked again, against the archive the requester was shown: the cluster
+	// and the chart may both have moved since.
+	res, ch, vals, err := s.check(r.Context(), q.Namespace, ask, q.Digest)
+	if err != nil {
+		catalogError(w, err)
+		return
+	}
+	if !res.OK {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "the check did not pass", "check": res})
+		return
+	}
+	q, err = s.catalog.requests.Update(r.Context(), id, func(q *helmreq.Request) error {
+		if !q.Open() {
+			return fmt.Errorf("the request is already %s", q.Status)
+		}
+		now := time.Now().UTC()
+		if changed {
+			asked := q.Values
+			q.AskedValues, q.Values = &asked, ask.Values
+		}
+		q.Status, q.Decider, q.Decided = helmreq.StatusInstalling, user.Username, &now
+		q.Objects = objectList(res.ReleasePlan)
+		return nil
+	})
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	detail := requestDetail(q, vals) + "; requested by " + q.Requester
+	if changed {
+		detail += "; values changed on approval"
+	}
+	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: q.Namespace,
+		Operation: "helm-" + q.Kind, Target: q.Release, Allowed: true, Success: true, Detail: detail})
+	s.startInstall(q, ch, vals)
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) handleRejectRequest(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Comment string `json:"comment"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body)
+	body.Comment = strings.TrimSpace(body.Comment)
+	if body.Comment == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "say why, so the requester knows what to change"})
+		return
+	}
+	q, err := s.catalog.requests.Update(r.Context(), id, func(q *helmreq.Request) error {
+		if !q.Open() {
+			return fmt.Errorf("the request is already %s", q.Status)
+		}
+		now := time.Now().UTC()
+		q.Status, q.Decider, q.Decided, q.Comment = helmreq.StatusRejected, user.Username, &now, body.Comment
+		return nil
+	})
+	if err != nil {
+		requestError(w, err)
+		return
+	}
+	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: q.Namespace,
+		Operation: "helm-request-reject", Target: q.Release, Allowed: true, Success: true,
+		Detail: q.Chart + " " + q.Version + "; requested by " + q.Requester})
+	writeJSON(w, http.StatusOK, q)
+}
+
+// startInstall runs an approved request in the background: waiting for pods
+// takes minutes, longer than anyone should hold a request open for. The
+// request says how it ended.
+func (s *Server) startInstall(q *helmreq.Request, ch *chart.Chart, vals map[string]any) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Catalog.InstallTimeout+time.Minute)
+		defer cancel()
+		err := s.catalog.installer(ctx, q, ch, vals)
+		status, detail := helmreq.StatusInstalled, ""
+		if err != nil {
+			status, detail = helmreq.StatusFailed, err.Error()
+			if trouble := s.catalog.trouble(ctx, q.Namespace, q.Release); trouble != "" {
+				detail += " — " + trouble
+			}
+		}
+		if _, uerr := s.catalog.requests.Update(context.Background(), q.ID, func(r *helmreq.Request) error {
+			r.Status, r.Detail = status, detail
+			return nil
+		}); uerr != nil {
+			slog.Error("record how a catalog install ended", "request", q.ID, "err", uerr)
+		}
+		s.audit.Log(audit.Entry{User: q.Decider, Environment: s.cfg.Environment, Namespace: q.Namespace,
+			Operation: "helm-" + q.Kind + "-result", Target: q.Release, Allowed: true,
+			Success: err == nil, Error: errStr(err), Detail: q.Chart + " " + q.Version})
+	}()
+}
+
+// runInstall is the installer the cluster provides.
+func (s *Server) runInstall(ctx context.Context, q *helmreq.Request, ch *chart.Chart, vals map[string]any) error {
+	labels := kube.CatalogLabels(q.Repo, q.Chart)
+	if q.Kind == helmreq.KindUpgrade {
+		return s.kube.UpgradeRelease(ctx, q.Namespace, q.Release, ch, vals, labels, s.cfg.Catalog.InstallTimeout)
+	}
+	return s.kube.InstallRelease(ctx, q.Namespace, q.Release, ch, vals, labels, s.cfg.Catalog.InstallTimeout)
+}
+
+var errForbidden = errors.New("only the requester or an administrator can withdraw a request")
+
+func requestError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, helmreq.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+	case errors.Is(err, errForbidden):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	}
+}
+
+// askError is something wrong with what was asked, rather than with reaching
+// the catalog or the cluster.
+type askError struct{ error }
+
+func (e askError) Unwrap() error { return e.error }
+
+func catalogError(w http.ResponseWriter, err error) {
+	var ae askError
+	if errors.As(err, &ae) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, helmcat.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+}

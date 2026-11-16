@@ -16,6 +16,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [canSeeServices, setCanSeeServices] = useState(false);
   const [canSeeIngresses, setCanSeeIngresses] = useState(false);
   const [canSeeAudit, setCanSeeAudit] = useState(false);
+  const [answersRequests, setAnswersRequests] = useState(false);
+  const [waiting, setWaiting] = useState(0);
   const [version, setVersion] = useState("");
   const [theme, setTheme] = useState<"dark" | "light">(
     () => (localStorage.getItem("devops-tools.theme") as "dark" | "light") ?? "dark"
@@ -47,10 +49,31 @@ export function Layout({ children }: { children: React.ReactNode }) {
         setCanSeeServices(m.capabilities?.services ?? false);
         setCanSeeIngresses(m.capabilities?.ingresses ?? false);
         setCanSeeAudit(m.capabilities?.audit ?? false);
+        setAnswersRequests(m.capabilities?.helmRequests ?? false);
         setVersion(m.version ?? "");
       })
       .catch(() => {});
   }, [api]);
+
+  // How many install requests wait for an answer: the number beside the menu
+  // item, for those who answer them. Asked again every minute, and on moving
+  // between pages, so an answered request leaves the count promptly.
+  useEffect(() => {
+    if (!answersRequests) return;
+    const ask = () =>
+      api
+        .requestCount()
+        .then((c) => setWaiting(c.waiting))
+        .catch(() => {});
+    ask();
+    const t = setInterval(ask, 60000);
+    // Answering one is said straight away, rather than at the next minute.
+    window.addEventListener("devops-tools:requests-changed", ask);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("devops-tools:requests-changed", ask);
+    };
+  }, [api, answersRequests, location.pathname]);
 
   const initials = (username || "?").slice(0, 2).toUpperCase();
 
@@ -120,7 +143,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Administering the portal sits apart from working in it: everything
             above is about workloads, this is about who may touch them. */}
-        {(canSeeUsers || canSeeAudit) && (
+        {(canSeeUsers || canSeeAudit || answersRequests) && (
           <nav className="nav nav-admin">
             {canSeeUsers && (
               <NavLink
@@ -131,6 +154,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
               >
                 <span>Access management</span>
                 <span className="chev">›</span>
+              </NavLink>
+            )}
+            {answersRequests && (
+              <NavLink
+                to="/helm-requests"
+                className={() =>
+                  "nav-item" + (location.pathname.startsWith("/helm-requests") ? " active" : "")
+                }
+              >
+                <span>Install requests</span>
+                {waiting > 0 ? (
+                  <span className="nav-count" title={`${waiting} waiting for an answer`}>
+                    {waiting}
+                  </span>
+                ) : (
+                  <span className="chev">›</span>
+                )}
               </NavLink>
             )}
             {/* The trail covers every operation, not only access, so it sits

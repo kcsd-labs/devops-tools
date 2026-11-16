@@ -220,6 +220,19 @@ exec:
   maxDuration: 1h # closed this long after it opened
   maxSessionsPerUser: 2 # per replica
 
+# Installing Helm charts from a catalog. The list comes from Artifact Hub
+# (verified publishers only); each chart is fetched from wherever its author
+# publishes it. Developers holding helm-install or helm-upgrade send a request,
+# and an administrator (user-manage) approves it — or installs directly. A
+# chart is rendered and checked first: nothing cluster-wide, nothing in another
+# namespace, no privileged pods, images that exist. Needs rbac.fullAccess: the
+# portal's own account installs whatever the chart holds.
+catalog:
+  enabled: true
+  artifactHub: https://artifacthub.io
+  requestTTL: 168h # an unanswered request expires after this long
+  installTimeout: 5m # how long an install waits for its pods
+
 # --- Access model -----------------------------------------------------------
 # Seeds an empty store on the very first start, and is then left alone: roles
 # are edited in the portal, under Access management, and kept on the volume.
@@ -257,6 +270,8 @@ rbac:
             - service-request-write
             - helm-list
             - helm-history
+            - helm-install
+            - helm-upgrade
             - secret-list
             - secret-read
             - secret-create

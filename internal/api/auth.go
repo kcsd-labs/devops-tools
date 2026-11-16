@@ -111,6 +111,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			// The storage screen: visible with the users list, but the buttons
 			// on it need the stronger grant — see the handlers.
 			"accessRestore": s.authz.AllowedGlobal(user.Roles, OpAccessRestore),
+			// Requests to install from the catalog, for those who answer them.
+			"helmRequests": s.catalog != nil && s.authz.AllowedGlobal(user.Roles, OpUserManage),
 		},
 	})
 }

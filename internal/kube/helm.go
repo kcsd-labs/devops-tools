@@ -21,6 +21,9 @@ type HelmRelease struct {
 	Chart     string `json:"chart"`
 	Version   string `json:"version"`
 	Updated   string `json:"updated"`
+	// Catalog is where a release installed from the catalog came from; empty
+	// for everything else, which a pipeline owns and upgrades.
+	Catalog *CatalogOrigin `json:"catalog,omitempty"`
 }
 
 // helmLog keeps what the SDK narrates while one action runs.
@@ -208,5 +211,6 @@ func toHelmRelease(r *release.Release) HelmRelease {
 	if !r.Info.LastDeployed.IsZero() {
 		hr.Updated = r.Info.LastDeployed.UTC().Format("2006-01-02T15:04:05Z")
 	}
+	hr.Catalog = catalogOrigin(r)
 	return hr
 }

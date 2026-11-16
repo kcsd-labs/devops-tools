@@ -35,6 +35,7 @@ type Config struct {
 	Configs       ConfigsConfig       `yaml:"configurations"`
 	ImageRebuild  ImageRebuildConfig  `yaml:"imageRebuild"`
 	Exec          ExecConfig          `yaml:"exec"`
+	Catalog       CatalogConfig       `yaml:"catalog"`
 
 	// RBAC seeds the access model on the very first start. One file rather than
 	// two: the roles it describes are configuration like everything else here,
@@ -403,6 +404,23 @@ type ExecConfig struct {
 	MaxSessionsPerUser int `yaml:"maxSessionsPerUser"`
 }
 
+// CatalogConfig is installing Helm charts from a catalog, with an
+// administrator's approval for anyone who is not one.
+type CatalogConfig struct {
+	// Enabled switches the catalog on; on unless set to false.
+	Enabled *bool `yaml:"enabled"`
+	// ArtifactHub is where the list of charts comes from. The charts themselves
+	// are fetched from wherever their authors publish them.
+	ArtifactHub string `yaml:"artifactHub"`
+	// RequestTTL is how long a request waits for an answer before it expires.
+	RequestTTL time.Duration `yaml:"requestTTL"`
+	// InstallTimeout is how long an install or upgrade waits for its pods.
+	InstallTimeout time.Duration `yaml:"installTimeout"`
+}
+
+// On reports whether the catalog is switched on.
+func (c CatalogConfig) On() bool { return c.Enabled == nil || *c.Enabled }
+
 // ClusterConfig selects how to reach the Kubernetes API.
 type ClusterConfig struct {
 	// InCluster uses the pod's ServiceAccount (the normal deployment mode).
@@ -606,6 +624,15 @@ func applyDefaults(c *Config) {
 	}
 	if c.Exec.MaxSessionsPerUser == 0 {
 		c.Exec.MaxSessionsPerUser = 2
+	}
+	if c.Catalog.ArtifactHub == "" {
+		c.Catalog.ArtifactHub = "https://artifacthub.io"
+	}
+	if c.Catalog.RequestTTL == 0 {
+		c.Catalog.RequestTTL = 7 * 24 * time.Hour
+	}
+	if c.Catalog.InstallTimeout == 0 {
+		c.Catalog.InstallTimeout = 5 * time.Minute
 	}
 	if c.Auth.LDAP.UserFilter == "" {
 		c.Auth.LDAP.UserFilter = "(uid=%s)"

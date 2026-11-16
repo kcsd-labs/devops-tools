@@ -19,7 +19,8 @@ type Authorizer struct {
 	// reserved are the namespaces a "*" grant does not reach — the cluster's
 	// own, from cluster.hiddenNamespaces. Set once, before serving.
 	reserved []string
-	// noExec are the namespaces no grant opens a shell in, by name or not.
+	// noExec are the namespaces no grant opens a shell in, or installs a chart
+	// into, by name or not.
 	noExec []string
 }
 
@@ -41,8 +42,16 @@ func (a *Authorizer) ReserveFromWildcard(patterns []string) {
 // whatever a role says. The cluster's own namespaces, because a shell there is
 // the cluster; the portal's, because its pod holds a token that administers
 // the cluster, and a shell beside it is the same thing by another door.
+//
+// Installing or upgrading a chart from the catalog is refused there too: a
+// chart is whatever its author wrote, run with the portal's own account.
 func (a *Authorizer) CloseToExec(patterns []string) {
 	a.noExec = patterns
+}
+
+// closedOp is an operation CloseToExec keeps out of the namespaces it names.
+func closedOp(op string) bool {
+	return op == config.OpPodExec || op == config.OpHelmInstall || op == config.OpHelmUpgrade
 }
 
 // Replace swaps in a new model atomically; called by the configuration watcher.
@@ -53,7 +62,7 @@ func (a *Authorizer) Replace(cfg *config.RBACConfig) {
 // Allowed reports whether any of the user's roles permits op in namespace.
 func (a *Authorizer) Allowed(roles []string, namespace, op string) bool {
 	cfg := a.cfg.Load()
-	if op == config.OpPodExec && config.MatchesNamespace(namespace, a.noExec) {
+	if closedOp(op) && config.MatchesNamespace(namespace, a.noExec) {
 		return false
 	}
 	for _, role := range roles {

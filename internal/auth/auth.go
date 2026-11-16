@@ -43,6 +43,12 @@ func FromContext(ctx context.Context) (*User, bool) {
 	return u, ok
 }
 
+// WithUser returns ctx carrying user, as Middleware leaves it. For handlers
+// served outside Middleware, and for tests.
+func WithUser(ctx context.Context, user *User) context.Context {
+	return context.WithValue(ctx, userCtxKey, user)
+}
+
 // tokenVerifier validates a bearer token presented on a request.
 type tokenVerifier interface {
 	Verify(ctx context.Context, rawToken string) (*User, error)
