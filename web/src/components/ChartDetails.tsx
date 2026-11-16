@@ -7,12 +7,10 @@ import { Markdown } from "./Markdown";
 // it is published, and its README.
 
 export function ChartDetails({
-  namespace,
   pkg,
   onClose,
   onInstall,
 }: {
-  namespace: string;
   pkg: CatalogPackage;
   onClose: () => void;
   onInstall: () => void;
@@ -24,13 +22,13 @@ export function ChartDetails({
   useEffect(() => {
     let live = true;
     api
-      .catalogChart(namespace, pkg.repo, pkg.name)
+      .catalogChart(pkg.repo, pkg.name)
       .then((c) => live && setInfo(c))
       .catch((e) => live && setError(e.message));
     return () => {
       live = false;
     };
-  }, [api, namespace, pkg.repo, pkg.name]);
+  }, [api, pkg.repo, pkg.name]);
 
   const p = info ?? pkg;
   return (

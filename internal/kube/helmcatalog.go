@@ -344,6 +344,30 @@ func (m *Manager) GetCatalogRelease(namespace, name string) (*CatalogRelease, er
 	return out, nil
 }
 
+// ListCatalogReleases lists the releases installed from the catalog, in every
+// namespace, read with the portal's account. The caller filters by who may
+// see what.
+func (m *Manager) ListCatalogReleases() ([]HelmRelease, error) {
+	cfg, _, err := m.helmActionConfig("", "")
+	if err != nil {
+		return nil, err
+	}
+	list := action.NewList(cfg)
+	list.AllNamespaces = true
+	list.Selector = labelCatalogRepo
+	rels, err := list.Run()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]HelmRelease, 0, len(rels))
+	for _, r := range rels {
+		if catalogOrigin(r) != nil {
+			out = append(out, toHelmRelease(r))
+		}
+	}
+	return out, nil
+}
+
 // ErrNotFromCatalog says a release was not installed from the catalog.
 var ErrNotFromCatalog = errors.New("this release was not installed from the catalog")
 

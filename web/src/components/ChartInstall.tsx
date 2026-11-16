@@ -7,8 +7,20 @@ import { CatalogError, type CatalogAsk, type CatalogChart, type CatalogCheck, ty
 import { CheckResult } from "./Catalog";
 import { Markdown } from "./Markdown";
 
+// The namespace this browser last installed into, offered first next time.
+const NAMESPACE_KEY = "devops-tools.helmPackages.namespace";
+
+function rememberedNamespace(): string {
+  try {
+    return localStorage.getItem(NAMESPACE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 type InstallProps = {
-  namespace: string;
+  /** Fixed for an upgrade; chosen in the dialog for an install. */
+  namespace?: string;
   repo: string;
   chart: string;
   kind: "install" | "upgrade";
@@ -25,9 +37,13 @@ type InstallProps = {
 
 /** The dialog a chart is installed or upgraded from. */
 export function ChartInstall(props: InstallProps) {
-  const { namespace, repo, chart, kind, direct } = props;
+  const { repo, chart, kind, direct } = props;
+  const fixedNamespace = !!props.namespace;
   const api = useApi();
   const theme = useEditorTheme();
+  const [namespace, setNamespace] = useState(props.namespace ?? "");
+  const [namespaces, setNamespaces] = useState<string[] | null>(fixedNamespace ? [props.namespace!] : null);
+  const [nameTouched, setNameTouched] = useState(!!props.release);
   const [info, setInfo] = useState<CatalogChart | null>(null);
   const [loadError, setLoadError] = useState("");
   const [version, setVersion] = useState(props.initialVersion ?? "");
@@ -41,17 +57,32 @@ export function ChartInstall(props: InstallProps) {
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
-  // The chart, for the chosen version.
+  // Where it may go: the namespaces the caller may install into, the one
+  // used last offered first.
+  useEffect(() => {
+    if (fixedNamespace) return;
+    api
+      .catalogNamespaces()
+      .then((r) => {
+        setNamespaces(r.namespaces);
+        const last = rememberedNamespace();
+        setNamespace((cur) => cur || (r.namespaces.includes(last) ? last : (r.namespaces[0] ?? "")));
+      })
+      .catch((e) => setLoadError(e.message));
+  }, [api, fixedNamespace]);
+
+  // The chart, for the chosen version; and a release name free in the
+  // chosen namespace, unless one was typed.
   useEffect(() => {
     let live = true;
     setLoadError("");
     api
-      .catalogChart(namespace, repo, chart, version)
+      .catalogChart(repo, chart, version, namespace)
       .then((c) => {
         if (!live) return;
         setInfo(c);
         if (!version) setVersion(c.version);
-        if (kind === "install" && !props.release) setRelease((r) => r || c.suggestedName);
+        if (kind === "install" && !nameTouched) setRelease(c.suggestedName);
       })
       .catch((e) => live && setLoadError(e.message));
     return () => {
@@ -61,10 +92,10 @@ export function ChartInstall(props: InstallProps) {
   }, [api, namespace, repo, chart, version]);
 
   const ask: CatalogAsk | null = useMemo(
-    () => (info && version && release ? { kind, release, repo, chart, version, values } : null),
-    [info, version, release, kind, repo, chart, values]
+    () => (info && version && release && namespace ? { kind, release, repo, chart, version, values } : null),
+    [info, version, release, namespace, kind, repo, chart, values]
   );
-  const key = ask ? JSON.stringify(ask) : "";
+  const key = ask ? JSON.stringify({ ...ask, namespace }) : "";
 
   // Checked again shortly after each change: what is installed is exactly
   // what was last checked.
@@ -96,7 +127,13 @@ export function ChartInstall(props: InstallProps) {
     setBusy(true);
     setSubmitError("");
     try {
-      props.onDone(await api.catalogRequest(namespace, ask));
+      const q = await api.catalogRequest(namespace, ask);
+      try {
+        localStorage.setItem(NAMESPACE_KEY, namespace);
+      } catch {
+        /* a convenience only */
+      }
+      props.onDone(q);
     } catch (e: any) {
       if (e instanceof CatalogError && e.check) setCheck(e.check);
       setSubmitError(e.message);
@@ -115,7 +152,7 @@ export function ChartInstall(props: InstallProps) {
             {info?.logo && <img className="cat-logo" src={info.logo} alt="" />}
             <div>
               <div className="muted">
-                {namespace} · {kind === "upgrade" ? `upgrade ${props.release}` : "install from the catalog"}
+                {kind === "upgrade" ? `${namespace} · upgrade ${props.release}` : "install from the catalog"}
               </div>
               <div className="modal-title">
                 {chart} <span className="cm-pill">{info?.repoTitle ?? repo}</span>
@@ -129,6 +166,9 @@ export function ChartInstall(props: InstallProps) {
         <div className="modal-body pad">
           {loadError && <div className="alert">{loadError}</div>}
           {!info && !loadError && <div className="muted">Fetching the chart…</div>}
+          {namespaces?.length === 0 && (
+            <div className="alert">There is no namespace you may install into. Ask for helm-install on one.</div>
+          )}
           {info && (
             <>
               <div className="muted cat-desc">
@@ -141,12 +181,30 @@ export function ChartInstall(props: InstallProps) {
                     className="input mono"
                     value={release}
                     disabled={kind === "upgrade"}
-                    onChange={(e) => setRelease(e.target.value.toLowerCase())}
+                    onChange={(e) => {
+                      setNameTouched(true);
+                      setRelease(e.target.value.toLowerCase());
+                    }}
                   />
                 </div>
                 <div className="field">
                   <label className="muted">Namespace</label>
-                  <input className="input mono" value={namespace} disabled />
+                  {fixedNamespace ? (
+                    <input className="input mono" value={namespace} disabled />
+                  ) : (
+                    <select
+                      className="input mono"
+                      value={namespace}
+                      onChange={(e) => setNamespace(e.target.value)}
+                      disabled={!namespaces?.length}
+                    >
+                      {(namespaces ?? []).map((ns) => (
+                        <option key={ns} value={ns}>
+                          {ns}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="field">
                   <label className="muted">

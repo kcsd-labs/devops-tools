@@ -86,6 +86,12 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 		namespaces: func(context.Context) ([]string, error) {
 			return []string{"devops-tools", "payments-dev", "accounts-dev"}, nil
 		},
+		fromCatalog: func() ([]kube.HelmRelease, error) {
+			return []kube.HelmRelease{
+				{Name: "redis", Namespace: "payments-dev", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "redis"}},
+				{Name: "kafka", Namespace: "accounts-dev", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "kafka"}},
+			}, nil
+		},
 	}
 
 	r := chi.NewRouter()
@@ -168,7 +174,7 @@ func TestRequestApprovedWithChangedValues(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		_, list := f.callList(t, "anna", reqs)
+		_, list := f.callList(t, "anna", "/api/helm/my-requests")
 		if len(list) == 1 && list[0]["status"] == helmreq.StatusInstalled {
 			return
 		}
@@ -265,7 +271,7 @@ func TestValueKeysNamesOnly(t *testing.T) {
 	}
 }
 
-func TestPackagesNamespacesAndReleases(t *testing.T) {
+func TestPackagesAcrossNamespaces(t *testing.T) {
 	f := newCatalogFixture(t)
 	_, out := f.call(t, "anna", "GET", "/api/helm/namespaces", nil)
 	if got, _ := json.Marshal(out["namespaces"]); string(got) != `["payments-dev"]` {
@@ -276,11 +282,30 @@ func TestPackagesNamespacesAndReleases(t *testing.T) {
 	if got, _ := json.Marshal(out["namespaces"]); string(got) != `["accounts-dev","payments-dev"]` {
 		t.Errorf("an administrator's namespaces = %s", got)
 	}
-	code, list := f.callList(t, "anna", "/api/namespaces/payments-dev/helm/catalog-releases")
-	if code != http.StatusOK || len(list) != 1 || list[0]["name"] != "redis" {
-		t.Errorf("catalog releases: %d %v", code, list)
+
+	// Installed: only the namespaces one may ask in.
+	_, list := f.callList(t, "anna", "/api/helm/catalog-releases")
+	if len(list) != 1 || list[0]["name"] != "redis" || list[0]["mayUpgrade"] != true || list[0]["mayList"] != true {
+		t.Errorf("a developer's catalog releases: %v", list)
 	}
-	if code, _ := f.call(t, "anna", "GET", "/api/namespaces/accounts-dev/helm/catalog-releases", nil); code != http.StatusForbidden {
-		t.Errorf("another team's namespace: %d", code)
+	_, list = f.callList(t, "root", "/api/helm/catalog-releases")
+	if len(list) != 2 {
+		t.Errorf("an administrator's catalog releases: %v", list)
+	}
+
+	// Requests: the team's, from every namespace the caller works in.
+	_, q := f.call(t, "root", "POST", "/api/namespaces/accounts-dev/helm/requests", ask("kafka", ""))
+	f.waitInstall(t)
+	_, q2 := f.call(t, "anna", "POST", reqs, ask("cache", ""))
+	_, mine := f.callList(t, "bob", "/api/helm/my-requests")
+	if len(mine) != 1 || mine[0]["id"] != q2["id"] {
+		t.Errorf("bob sees %v, want anna's request in payments-dev only (not %v)", mine, q["id"])
+	}
+
+	// Someone who may ask nowhere does not get the page at all.
+	catalogUsers["nobody"] = nil
+	defer delete(catalogUsers, "nobody")
+	if code, _ := f.call(t, "nobody", "GET", "/api/helm/catalog?q=redis", nil); code != http.StatusForbidden {
+		t.Errorf("the catalog for someone with no grant: %d", code)
 	}
 }

@@ -50,6 +50,9 @@ type catalog struct {
 	trouble    func(ctx context.Context, ns, name string) string
 	releases   func(ns string) ([]kube.HelmRelease, error)
 	namespaces func(ctx context.Context) ([]string, error)
+	// fromCatalog lists every release installed from the catalog, in every
+	// namespace.
+	fromCatalog func() ([]kube.HelmRelease, error)
 }
 
 // WithCatalog switches the catalog on.
@@ -60,6 +63,7 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 	c.current = s.kube.GetCatalogRelease
 	c.trouble = s.kube.ReleaseTrouble
 	c.releases = func(ns string) ([]kube.HelmRelease, error) { return s.kube.ListReleases("", ns) }
+	c.fromCatalog = s.kube.ListCatalogReleases
 	c.namespaces = func(ctx context.Context) ([]string, error) {
 		return s.kube.ListNamespaces(ctx, "", s.cfg.Cluster.HiddenNamespaces)
 	}
@@ -82,19 +86,23 @@ func (s *Server) catalogRoutes(r chi.Router, base string) {
 	if s.catalog == nil {
 		return
 	}
-	// The Helm Packages page: open to whoever may ask for an install or an
-	// upgrade, whether or not they hold helm-list.
-	packages := []string{OpHelmInstall, OpHelmUpgrade, OpHelmList}
-	r.Get("/helm/namespaces", s.handleCatalogNamespaces)
-	r.Get(base+"/helm/catalog-access", s.requireAnyOp(packages, s.handleCatalogAccess))
-	r.Get(base+"/helm/catalog-releases", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade}, s.handleCatalogReleases))
-	r.Get(base+"/helm/catalog", s.requireOp(OpHelmInstall, s.handleCatalogSearch))
-	r.Get(base+"/helm/catalog/{repo}/{chart}", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade}, s.handleCatalogChart))
+	// The Helm Packages page belongs to no namespace: the catalog is one list,
+	// and what was installed or asked for is shown across every namespace the
+	// caller may ask in. The namespace is chosen when installing. Open to
+	// whoever may ask for an install or an upgrade somewhere, whether or not
+	// they hold helm-list.
+	r.Get("/helm/namespaces", s.requirePackages(s.handleCatalogNamespaces))
+	r.Get("/helm/access", s.requirePackages(s.handleCatalogAccess))
+	r.Get("/helm/catalog", s.requirePackages(s.handleCatalogSearch))
+	r.Get("/helm/catalog/{repo}/{chart}", s.requirePackages(s.handleCatalogChart))
+	r.Get("/helm/catalog-releases", s.requirePackages(s.handleCatalogReleases))
+	r.Get("/helm/my-requests", s.requirePackages(s.handleMyRequests))
+
+	// Acting in one namespace is checked against that namespace.
 	r.Get(base+"/helm/releases/{name}/catalog", s.requireOp(OpHelmUpgrade, s.handleCatalogRelease))
 	r.Post(base+"/helm/check", s.handleCatalogCheck)
-	r.Get(base+"/helm/requests", s.requireAnyOp(packages, s.handleNamespaceRequests))
 	r.Post(base+"/helm/requests", s.handleCreateRequest)
-	r.Delete(base+"/helm/requests/{id}", s.requireAnyOp(packages, s.handleWithdrawRequest))
+	r.Delete(base+"/helm/requests/{id}", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade, OpHelmList}, s.handleWithdrawRequest))
 
 	r.Get("/helm/requests", s.requireGlobalOp(OpUserManage, s.handleAllRequests))
 	r.Get("/helm/requests/count", s.requireGlobalOp(OpUserManage, s.handleRequestCount))
@@ -126,14 +134,37 @@ func (s *Server) requireAnyOp(ops []string, handler http.HandlerFunc) http.Handl
 
 func (s *Server) isApprover(roles []string) bool { return s.authz.AllowedGlobal(roles, OpUserManage) }
 
+// mayAskAnywhere reports whether these roles may ask for an install or an
+// upgrade in some namespace: what opens the Helm Packages page.
+func (s *Server) mayAskAnywhere(roles []string) bool {
+	return len(s.authz.NamespacesForOp(roles, OpHelmInstall)) > 0 ||
+		len(s.authz.NamespacesForOp(roles, OpHelmUpgrade)) > 0
+}
+
+// requirePackages lets through whoever may ask for an install or an upgrade
+// somewhere.
+func (s *Server) requirePackages(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.FromContext(r.Context())
+		if !ok {
+			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+			return
+		}
+		if !s.mayAskAnywhere(user.Roles) {
+			s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: "-",
+				Operation: OpHelmInstall, Allowed: false})
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		handler(w, r)
+	}
+}
+
 func (s *Server) handleCatalogAccess(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.FromContext(r.Context())
-	ns := chi.URLParam(r, "namespace")
 	writeJSON(w, http.StatusOK, map[string]bool{
-		"install": s.authz.Allowed(user.Roles, ns, OpHelmInstall),
-		"upgrade": s.authz.Allowed(user.Roles, ns, OpHelmUpgrade),
-		// Whether the Helm releases page, with the history, is open to them.
-		"list": s.authz.Allowed(user.Roles, ns, OpHelmList),
+		"install": len(s.authz.NamespacesForOp(user.Roles, OpHelmInstall)) > 0,
+		"upgrade": len(s.authz.NamespacesForOp(user.Roles, OpHelmUpgrade)) > 0,
 		// An administrator's install needs no request.
 		"direct": s.isApprover(user.Roles),
 	})
@@ -145,48 +176,64 @@ func (s *Server) mayAskFor(roles []string, ns string) bool {
 	return s.authz.Allowed(roles, ns, OpHelmInstall) || s.authz.Allowed(roles, ns, OpHelmUpgrade)
 }
 
-// handleCatalogNamespaces lists the namespaces the Helm Packages page offers:
-// those the caller may install or upgrade in. Never the closed ones, whatever
-// a role says.
+// handleCatalogNamespaces lists the namespaces a chart may be installed into
+// by the caller — what the install dialog offers. Those holding helm-install;
+// never the closed ones, whatever a role says.
 func (s *Server) handleCatalogNamespaces(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.FromContext(r.Context())
-	candidates := unionSorted(
-		s.authz.NamespacesForOp(user.Roles, OpHelmInstall),
-		s.authz.NamespacesForOp(user.Roles, OpHelmUpgrade))
-	for _, ns := range candidates {
-		if ns == "*" {
-			all, err := s.catalog.namespaces(r.Context())
-			if err != nil {
-				http.Error(w, "could not list the namespaces: "+err.Error(), http.StatusBadGateway)
-				return
-			}
-			candidates = unionSorted(all, candidates)
-			break
+	candidates := s.authz.NamespacesForOp(user.Roles, OpHelmInstall)
+	if len(candidates) == 1 && candidates[0] == "*" {
+		all, err := s.catalog.namespaces(r.Context())
+		if err != nil {
+			http.Error(w, "could not list the namespaces: "+err.Error(), http.StatusBadGateway)
+			return
 		}
+		candidates = unionSorted(all, s.authz.NamedNamespaces(user.Roles, OpHelmInstall))
 	}
 	out := []string{}
 	for _, ns := range candidates {
-		if ns != "*" && s.mayAskFor(user.Roles, ns) {
+		if ns != "*" && s.authz.Allowed(user.Roles, ns, OpHelmInstall) {
 			out = append(out, ns)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"namespaces": out})
 }
 
-// handleCatalogReleases lists the releases in a namespace that came from the
-// catalog — the ones this page upgrades.
+// catalogReleaseRow is a release from the catalog, with what the caller may
+// do with it.
+type catalogReleaseRow struct {
+	kube.HelmRelease
+	MayUpgrade bool `json:"mayUpgrade"`
+	// MayList: the Helm releases page, with the history, is open to them.
+	MayList bool `json:"mayList"`
+}
+
+// handleCatalogReleases lists the releases installed from the catalog in the
+// namespaces the caller may ask in.
 func (s *Server) handleCatalogReleases(w http.ResponseWriter, r *http.Request) {
-	rels, err := s.catalog.releases(chi.URLParam(r, "namespace"))
+	user, _ := auth.FromContext(r.Context())
+	rels, err := s.catalog.fromCatalog()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := []kube.HelmRelease{}
+	out := []catalogReleaseRow{}
 	for _, rel := range rels {
-		if rel.Catalog != nil {
-			out = append(out, rel)
+		if rel.Catalog == nil || !s.mayAskFor(user.Roles, rel.Namespace) {
+			continue
 		}
+		out = append(out, catalogReleaseRow{
+			HelmRelease: rel,
+			MayUpgrade:  s.authz.Allowed(user.Roles, rel.Namespace, OpHelmUpgrade),
+			MayList:     s.authz.Allowed(user.Roles, rel.Namespace, OpHelmList),
+		})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
+		}
+		return out[i].Name < out[j].Name
+	})
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -211,7 +258,8 @@ type chartInfo struct {
 }
 
 func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "namespace")
+	user, _ := auth.FromContext(r.Context())
+	ns := r.URL.Query().Get("namespace")
 	loc, arc, err := s.catalog.fetch(r.Context(), chi.URLParam(r, "repo"), chi.URLParam(r, "chart"), r.URL.Query().Get("version"))
 	if err != nil {
 		catalogError(w, err)
@@ -223,7 +271,13 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 			info.Defaults = string(f.Data)
 		}
 	}
-	info.SuggestedName = s.freeReleaseName(ns, loc.Name)
+	// A free name only where the caller may look: the names in a namespace
+	// are not theirs to probe otherwise.
+	if ns != "" && s.mayAskFor(user.Roles, ns) {
+		info.SuggestedName = s.freeReleaseName(ns, loc.Name)
+	} else {
+		info.SuggestedName = loc.Name
+	}
 	writeJSON(w, http.StatusOK, info)
 }
 
@@ -523,8 +577,10 @@ func valueKeys(vals map[string]any) []string {
 	return out
 }
 
-func (s *Server) handleNamespaceRequests(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "namespace")
+// handleMyRequests lists the requests in every namespace the caller may ask
+// in or list releases in: their team's, not only their own.
+func (s *Server) handleMyRequests(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
 	all, err := s.catalog.requests.List(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -532,7 +588,7 @@ func (s *Server) handleNamespaceRequests(w http.ResponseWriter, r *http.Request)
 	}
 	out := []*helmreq.Request{}
 	for _, q := range all {
-		if q.Namespace == ns {
+		if s.mayAskFor(user.Roles, q.Namespace) || s.authz.Allowed(user.Roles, q.Namespace, OpHelmList) {
 			out = append(out, q)
 		}
 	}

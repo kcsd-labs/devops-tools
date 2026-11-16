@@ -134,7 +134,7 @@ export function Helm() {
                   {r.catalog && (
                     <Link
                       className="tag"
-                      to={`/helm-packages?namespace=${encodeURIComponent(namespace)}&view=installed`}
+                      to="/helm-packages?view=installed"
                       title={`Installed from the catalog (${r.catalog.repo}/${r.catalog.chart}) — upgrade it under Helm Packages`}
                     >
                       catalog

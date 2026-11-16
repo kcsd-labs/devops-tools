@@ -6,95 +6,65 @@ import { useDialogs } from "../components/Dialogs";
 import { pushToast } from "../toasts";
 import { RequestStatus, requestLine, requestNote } from "../components/Catalog";
 
-// Helm Packages: installing charts from the catalog into a namespace, upgrading
-// what was installed from it, and following the requests that ask for either.
-// The namespace is picked here, as on Services, rather than reached through
-// the namespace list.
+// Helm Packages: installing charts from the catalog, upgrading what was
+// installed from it, and following the requests that ask for either. Not tied
+// to a namespace: the catalog is one list, and what was installed or asked for
+// is shown across every namespace the caller works in. The namespace is chosen
+// in the install dialog.
 
 // The install dialog carries the YAML editor, and the details a Markdown
 // renderer; each is loaded when it is opened.
 const ChartInstall = lazy(() => import("../components/ChartInstall").then((m) => ({ default: m.ChartInstall })));
 const ChartDetails = lazy(() => import("../components/ChartDetails").then((m) => ({ default: m.ChartDetails })));
 
-const NAMESPACE_KEY = "devops-tools.helmPackages.namespace";
-
-type Access = { install: boolean; upgrade: boolean; direct: boolean; list: boolean };
+type Access = { install: boolean; upgrade: boolean; direct: boolean };
 type View = "catalog" | "installed" | "requests";
+type CatalogRelease = HelmRelease & { mayUpgrade: boolean; mayList: boolean };
 
 /** What the install dialog is open for. */
 type Installing = {
   kind: "install" | "upgrade";
   repo: string;
   chart: string;
+  /** Fixed for an upgrade, and for a request sent again. */
+  namespace?: string;
   release?: string;
   fromVersion?: string;
   values?: string;
   version?: string;
 };
 
-function rememberedNamespace(): string {
-  try {
-    return localStorage.getItem(NAMESPACE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
 export function HelmPackages() {
   const api = useApi();
   const [params, setParams] = useSearchParams();
-  const [namespaces, setNamespaces] = useState<string[] | null>(null);
   const [error, setError] = useState("");
   const [access, setAccess] = useState<Access | null>(null);
   const [installing, setInstalling] = useState<Installing | null>(null);
   const [details, setDetails] = useState<CatalogPackage | null>(null);
   const { dialogs, confirm, alertDlg } = useDialogs();
 
-  // As on Services: the namespace in the address, else the one looked at
-  // last, else the first.
-  const asked = params.get("namespace") ?? "";
-  const namespace =
-    namespaces && namespaces.includes(asked)
-      ? asked
-      : namespaces?.includes(rememberedNamespace())
-        ? rememberedNamespace()
-        : (namespaces?.[0] ?? "");
   const tabs: View[] = access
     ? (["catalog", "installed", "requests"] as View[]).filter((v) => v !== "catalog" || access.install)
     : [];
   const wanted = params.get("view") as View | null;
   const view: View = wanted && tabs.includes(wanted) ? wanted : (tabs[0] ?? "catalog");
-  const go = (next: { namespace?: string; view?: View }) =>
-    setParams({ namespace: next.namespace ?? namespace, view: next.view ?? view }, { replace: true });
+  const go = (v: View) => setParams({ view: v }, { replace: true });
 
   useEffect(() => {
     api
-      .catalogNamespaces()
-      .then((r) => setNamespaces(r.namespaces))
+      .catalogAccess()
+      .then(setAccess)
       .catch((e) => setError(e.message));
   }, [api]);
 
-  useEffect(() => {
-    if (!namespace) return;
-    try {
-      localStorage.setItem(NAMESPACE_KEY, namespace);
-    } catch {
-      /* a convenience only */
-    }
-    setAccess(null);
-    api
-      .catalogAccess(namespace)
-      .then(setAccess)
-      .catch((e) => setError(e.message));
-  }, [api, namespace]);
-
   const startUpgrade = async (r: HelmRelease) => {
     try {
-      const cur = await api.catalogRelease(namespace, r.name);
+      const cur = await api.catalogRelease(r.namespace, r.name);
       setInstalling({
         kind: "upgrade",
         repo: cur.origin.repo,
         chart: cur.origin.chart,
+        namespace: r.namespace,
         release: r.name,
         fromVersion: cur.version,
         values: cur.values,
@@ -108,11 +78,11 @@ export function HelmPackages() {
     setInstalling(null);
     pushToast(
       q.status === "installing"
-        ? `${q.release}: ${q.kind === "upgrade" ? "upgrading" : "installing"} — follow it under Requests`
-        : `Request for ${q.release} sent to platform administrators`,
+        ? `${q.release}: ${q.kind === "upgrade" ? "upgrading" : "installing"} in ${q.namespace} — follow it under Requests`
+        : `Request for ${q.release} in ${q.namespace} sent to platform administrators`,
       "ok"
     );
-    go({ view: "requests" });
+    go("requests");
   };
 
   return (
@@ -124,47 +94,25 @@ export function HelmPackages() {
           {tabs.length > 0 && (
             <div className="seg-switch" role="tablist">
               {tabs.map((v) => (
-                <button key={v} className={view === v ? "on" : ""} onClick={() => go({ view: v })}>
+                <button key={v} className={view === v ? "on" : ""} onClick={() => go(v)}>
                   {v === "catalog" ? "Catalog" : v === "installed" ? "Installed" : "Requests"}
                 </button>
               ))}
             </div>
           )}
           <div className="muted svc-sub">
-            Charts from Artifact Hub, installed into a namespace
-            {access && !access.direct ? " once a platform administrator approves" : ""}
+            Charts from Artifact Hub; the namespace is chosen when installing
+            {access && !access.direct ? ", and a platform administrator approves" : ""}
           </div>
         </div>
       </div>
 
-      <div className="row svc-toolbar">
-        {namespaces && namespaces.length > 1 && (
-          <select
-            className="input"
-            style={{ flex: "0 0 auto", width: 260 }}
-            value={namespace}
-            onChange={(e) => go({ namespace: e.target.value })}
-            aria-label="Namespace"
-          >
-            {namespaces.map((ns) => (
-              <option key={ns} value={ns}>
-                {ns}
-              </option>
-            ))}
-          </select>
-        )}
-        {namespaces && namespaces.length === 1 && <span className="svc-only-ns">{namespace}</span>}
-      </div>
-
       {error && <div className="alert">{error}</div>}
-      {namespaces && namespaces.length === 0 && (
-        <div className="card pad muted">You may not install packages in any namespace.</div>
-      )}
 
       {installing && (
         <Suspense fallback={null}>
           <ChartInstall
-            namespace={namespace}
+            namespace={installing.namespace}
             repo={installing.repo}
             chart={installing.chart}
             kind={installing.kind}
@@ -182,7 +130,6 @@ export function HelmPackages() {
       {details && (
         <Suspense fallback={null}>
           <ChartDetails
-            namespace={namespace}
             pkg={details}
             onClose={() => setDetails(null)}
             onInstall={() => {
@@ -193,29 +140,21 @@ export function HelmPackages() {
         </Suspense>
       )}
 
-      {namespace && access && view === "catalog" && (
+      {access && view === "catalog" && (
         <CatalogList
-          namespace={namespace}
           onOpen={setDetails}
           onPick={(p) => setInstalling({ kind: "install", repo: p.repo, chart: p.name })}
         />
       )}
-      {namespace && access && view === "installed" && (
-        <InstalledList
-          namespace={namespace}
-          mayUpgrade={access.upgrade}
-          mayList={access.list}
-          onUpgrade={startUpgrade}
-        />
-      )}
-      {namespace && access && view === "requests" && (
+      {access && view === "installed" && <InstalledList onUpgrade={startUpgrade} />}
+      {access && view === "requests" && (
         <RequestList
-          namespace={namespace}
           onSendAgain={(q) =>
             setInstalling({
               kind: q.kind,
               repo: q.repo,
               chart: q.chart,
+              namespace: q.namespace,
               release: q.release,
               fromVersion: q.fromVersion,
               values: q.values,
@@ -232,11 +171,9 @@ export function HelmPackages() {
 
 /** The catalog: a search over Artifact Hub, a page at a time. */
 function CatalogList({
-  namespace,
   onOpen,
   onPick,
 }: {
-  namespace: string;
   onOpen: (p: CatalogPackage) => void;
   onPick: (p: CatalogPackage) => void;
 }) {
@@ -258,7 +195,7 @@ function CatalogList({
     let live = true;
     setLoading(true);
     api
-      .catalogSearch(namespace, shown, 0)
+      .catalogSearch(shown, 0)
       .then((p) => {
         if (!live) return;
         setItems(p.packages);
@@ -270,12 +207,12 @@ function CatalogList({
     return () => {
       live = false;
     };
-  }, [api, namespace, shown]);
+  }, [api, shown]);
 
   const more = async () => {
     setLoading(true);
     try {
-      const p = await api.catalogSearch(namespace, shown, items.length);
+      const p = await api.catalogSearch(shown, items.length);
       setItems((cur) => [...cur, ...p.packages]);
     } catch (e: any) {
       setError(e.message);
@@ -351,32 +288,21 @@ function CatalogList({
   );
 }
 
-/** What was installed into the namespace from the catalog. */
-function InstalledList({
-  namespace,
-  mayUpgrade,
-  mayList,
-  onUpgrade,
-}: {
-  namespace: string;
-  mayUpgrade: boolean;
-  mayList: boolean;
-  onUpgrade: (r: HelmRelease) => void;
-}) {
+/** What was installed from the catalog, in every namespace one works in. */
+function InstalledList({ onUpgrade }: { onUpgrade: (r: HelmRelease) => void }) {
   const api = useApi();
-  const [list, setList] = useState<HelmRelease[] | null>(null);
+  const [list, setList] = useState<CatalogRelease[] | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setList(null);
     api
-      .catalogReleases(namespace)
+      .catalogReleases()
       .then((l) => {
         setList(l);
         setError("");
       })
       .catch((e) => setError(e.message));
-  }, [api, namespace]);
+  }, [api]);
 
   return (
     <div className="card no-pad">
@@ -386,15 +312,13 @@ function InstalledList({
         </div>
       )}
       {list === null && !error && <div className="muted center pad">Loading…</div>}
-      {list?.length === 0 && (
-        <div className="muted center pad">Nothing in {namespace} was installed from the catalog yet</div>
-      )}
+      {list?.length === 0 && <div className="muted center pad">Nothing was installed from the catalog yet</div>}
       <div className="cat-list">
         {list?.map((r) => (
-          <div className="cat-row" key={r.name}>
+          <div className="cat-row" key={r.namespace + "/" + r.name}>
             <div className="cat-main">
               <div>
-                <b className="mono">{r.name}</b>{" "}
+                <b className="mono">{r.name}</b> <span className="cm-pill">{r.namespace}</span>{" "}
                 <span className="muted">
                   {r.chart} {r.version} · {r.catalog?.repo}
                 </span>
@@ -404,12 +328,12 @@ function InstalledList({
                 {r.updated ? ` · ${new Date(r.updated).toLocaleString()}` : ""}
               </div>
             </div>
-            {mayList && (
-              <Link className="btn ghost sm" to={`/ns/${namespace}/helm`}>
+            {r.mayList && (
+              <Link className="btn ghost sm" to={`/ns/${r.namespace}/helm`}>
                 History
               </Link>
             )}
-            {mayUpgrade && (
+            {r.mayUpgrade && (
               <button className="btn sm" onClick={() => onUpgrade(r)}>
                 Upgrade
               </button>
@@ -423,14 +347,13 @@ function InstalledList({
 
 type ConfirmFn = (o: { title: string; message: string; okText?: string; danger?: boolean }) => Promise<boolean>;
 
-/** This namespace's requests, newest first; refreshed while one is open. */
+/** The requests in every namespace one works in, newest first; refreshed
+    while one is open. */
 function RequestList({
-  namespace,
   onSendAgain,
   alertDlg,
   confirm,
 }: {
-  namespace: string;
   onSendAgain: (q: HelmRequest) => void;
   alertDlg: (msg: string, title?: string) => Promise<unknown>;
   confirm: ConfirmFn;
@@ -442,13 +365,13 @@ function RequestList({
 
   const load = useCallback(() => {
     api
-      .namespaceRequests(namespace)
+      .myRequests()
       .then((l) => {
         setList(l);
         setError("");
       })
       .catch((e) => setError(e.message));
-  }, [api, namespace]);
+  }, [api]);
 
   useEffect(load, [load]);
   const open = list?.some((q) => q.status === "installing" || q.status === "waiting");
@@ -461,12 +384,12 @@ function RequestList({
   const withdraw = async (q: HelmRequest) => {
     const ok = await confirm({
       title: "Withdraw request",
-      message: `Withdraw the request for ${q.release}?`,
+      message: `Withdraw the request for ${q.release} in ${q.namespace}?`,
       okText: "Withdraw",
     });
     if (!ok) return;
     try {
-      await api.withdrawRequest(namespace, q.id);
+      await api.withdrawRequest(q.namespace, q.id);
       load();
     } catch (e: any) {
       void alertDlg(e.message, "Error");
@@ -481,13 +404,14 @@ function RequestList({
         </div>
       )}
       {list === null && !error && <div className="muted center pad">Loading…</div>}
-      {list?.length === 0 && <div className="muted center pad">No requests in this namespace yet</div>}
+      {list?.length === 0 && <div className="muted center pad">No requests yet</div>}
       <div className="cat-list">
         {list?.map((q) => (
           <div className="cat-row" key={q.id}>
             <div className="cat-main">
               <div>
-                <b className="mono">{q.release}</b> <span className="muted">{requestLine(q)}</span>
+                <b className="mono">{q.release}</b> <span className="cm-pill">{q.namespace}</span>{" "}
+                <span className="muted">{requestLine(q)}</span>
               </div>
               <div className={"cat-desc-line " + (q.status === "failed" ? "cat-failed" : "muted")}>{requestNote(q)}</div>
             </div>
@@ -516,7 +440,9 @@ function RequestList({
             <div className="modal-head">
               <div>
                 <div className="muted">Changed on approval by {changesOf.decider}</div>
-                <div className="modal-title mono">{changesOf.release}</div>
+                <div className="modal-title mono">
+                  {changesOf.release} · {changesOf.namespace}
+                </div>
               </div>
               <button className="icon-btn" onClick={() => setChangesOf(null)} aria-label="Close">
                 ✕

@@ -912,25 +912,27 @@ export function createApi(token: string | undefined) {
         `/namespaces/${ns}/helm/releases/${name}`
       ),
 
+    /** The namespaces a chart may be installed into. */
     catalogNamespaces: () => catalogCall<{ namespaces: string[] }>("GET", "/helm/namespaces"),
-    catalogAccess: (ns: string) =>
-      catalogCall<{ install: boolean; upgrade: boolean; direct: boolean; list: boolean }>(
-        "GET",
-        `/namespaces/${ns}/helm/catalog-access`
-      ),
-    /** The releases in a namespace that came from the catalog. */
-    catalogReleases: (ns: string) => catalogCall<HelmRelease[]>("GET", `/namespaces/${ns}/helm/catalog-releases`),
-    catalogSearch: (ns: string, q: string, offset = 0) =>
+    catalogAccess: () => catalogCall<{ install: boolean; upgrade: boolean; direct: boolean }>("GET", "/helm/access"),
+    /** Releases installed from the catalog, in every namespace the caller may ask in. */
+    catalogReleases: () =>
+      catalogCall<(HelmRelease & { mayUpgrade: boolean; mayList: boolean })[]>("GET", "/helm/catalog-releases"),
+    catalogSearch: (q: string, offset = 0) =>
       catalogCall<{ packages: CatalogPackage[]; total: number }>(
         "GET",
-        `/namespaces/${ns}/helm/catalog?q=${encodeURIComponent(q)}&offset=${offset}`
+        `/helm/catalog?q=${encodeURIComponent(q)}&offset=${offset}`
       ),
-    catalogChart: (ns: string, repo: string, chart: string, version = "") =>
-      catalogCall<CatalogChart>(
+    /** One version of a chart; with a namespace, a release name free there. */
+    catalogChart: (repo: string, chart: string, version = "", ns = "") => {
+      const q = new URLSearchParams();
+      if (version) q.set("version", version);
+      if (ns) q.set("namespace", ns);
+      return catalogCall<CatalogChart>(
         "GET",
-        `/namespaces/${ns}/helm/catalog/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}` +
-          (version ? `?version=${encodeURIComponent(version)}` : "")
-      ),
+        `/helm/catalog/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}?${q.toString()}`
+      );
+    },
     catalogRelease: (ns: string, name: string) =>
       catalogCall<{ origin: { repo: string; chart: string }; version: string; values: string }>(
         "GET",
@@ -940,7 +942,8 @@ export function createApi(token: string | undefined) {
       catalogCall<CatalogCheck>("POST", `/namespaces/${ns}/helm/check`, ask),
     catalogRequest: (ns: string, ask: CatalogAsk) =>
       catalogCall<HelmRequest>("POST", `/namespaces/${ns}/helm/requests`, ask),
-    namespaceRequests: (ns: string) => catalogCall<HelmRequest[]>("GET", `/namespaces/${ns}/helm/requests`),
+    /** Requests in every namespace the caller works in. */
+    myRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/my-requests"),
     withdrawRequest: (ns: string, id: string) =>
       catalogCall<HelmRequest>("DELETE", `/namespaces/${ns}/helm/requests/${id}`),
     allRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/requests"),
