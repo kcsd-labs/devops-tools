@@ -469,8 +469,6 @@ export function ChartInstall(props: InstallProps) {
             <section className="cat-main">
               {view === "simple" ? (
                 <SimpleSide
-                  check={check}
-                  checking={checking}
                   values={values}
                   theme={theme}
                   help={editorHelp}
@@ -591,18 +589,15 @@ export function ChartInstall(props: InstallProps) {
   );
 }
 
-/** Simple view: what the release will give, and what the answers wrote. */
+/** Simple view: what the answers wrote into the values. The chart's own notes
+    are in Values (YAML), under After install. */
 function SimpleSide({
-  check,
-  checking,
   values,
   theme,
   help,
   onEditor,
   onEdit,
 }: {
-  check?: CatalogCheck;
-  checking: boolean;
   values: string;
   theme: ReturnType<typeof useEditorTheme>;
   help: ReturnType<typeof keyDocs>[];
@@ -611,15 +606,6 @@ function SimpleSide({
 }) {
   return (
     <div className="cat-simple">
-      <div className="cat-simple-block cat-simple-after">
-        <div className="cat-side-title">What you'll get</div>
-        {check?.ok && check.objects.length > 0 && (
-          <div className="muted cat-creates">Creates {objectSummary(check.objects)}.</div>
-        )}
-        <div className="cat-notes">
-          <Notes check={check} checking={checking} />
-        </div>
-      </div>
       <div className="cat-simple-block cat-simple-values">
         <div className="cat-simple-head">
           <div className="cat-side-title">What this writes into the values</div>

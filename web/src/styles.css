@@ -3302,35 +3302,21 @@ a.seg-btn {
   flex-direction: column;
   gap: 8px;
 }
-/* Simple: what the release gives on top, at most half the height and
-   scrolling on its own; the values below take the rest. */
+/* Simple: the values the answers wrote, the whole height. */
 .cat-simple {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
 }
 .cat-simple-block {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.cat-simple-after {
-  flex: 0 1 auto;
-  max-height: 50%;
-}
 .cat-simple-values {
   flex: 1 1 0;
   min-height: 180px;
-}
-.cat-simple-after .cat-notes {
-  overflow: auto;
-  min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 10px 12px;
-  font-size: 13px;
 }
 .cat-simple-head {
   display: flex;
@@ -3345,10 +3331,6 @@ a.seg-btn {
   flex: 1 1 0;
   min-height: 120px;
   position: relative;
-}
-.cat-creates {
-  font-size: 12px;
-  margin-bottom: 6px;
 }
 .cat-notes-text {
   margin: 0;
