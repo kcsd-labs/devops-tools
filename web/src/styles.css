@@ -3295,6 +3295,17 @@ a.seg-btn {
 }
 .cat-asked-key {
   font-size: 12px;
+  overflow-wrap: anywhere;
+}
+/* Long key paths wrap; the column never scrolls sideways. */
+.cat-side {
+  overflow-x: hidden;
+}
+.cat-side label,
+.cat-side .cat-why,
+.cat-side .field-hint,
+.cat-more summary {
+  overflow-wrap: anywhere;
 }
 .cat-asked .field {
   margin-bottom: 10px;

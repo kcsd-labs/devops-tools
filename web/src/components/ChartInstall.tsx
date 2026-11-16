@@ -1057,6 +1057,10 @@ function ChartNeeds({
       }
     }
   }
+  // A Secret's name before the key inside it.
+  named.sort((a, b) =>
+    parentOf(a) === parentOf(b) ? Number(lastOf(a) === "key") - Number(lastOf(b) === "key") : a.localeCompare(b)
+  );
   // Beside what was asked: the rest of the block, as the chart shows it.
   const groups: string[] = [];
   for (const a of asked) {
