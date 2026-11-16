@@ -17,7 +17,7 @@ import { Loading, RequestStatus, requestLine, requestNote } from "../components/
 const ChartInstall = lazy(() => import("../components/ChartInstall").then((m) => ({ default: m.ChartInstall })));
 const ChartDetails = lazy(() => import("../components/ChartDetails").then((m) => ({ default: m.ChartDetails })));
 
-type Access = { install: boolean; upgrade: boolean; direct: boolean };
+type Access = { install: boolean; upgrade: boolean; direct: boolean; newNamespace?: boolean };
 type View = "catalog" | "installed" | "requests";
 type CatalogRelease = HelmRelease & { mayUpgrade: boolean; mayList: boolean };
 
@@ -121,6 +121,7 @@ export function HelmPackages() {
             initialValues={installing.values}
             initialVersion={installing.version}
             direct={!!access?.direct}
+            newNamespace={!!access?.newNamespace}
             onClose={() => setInstalling(null)}
             onDone={requestSent}
           />

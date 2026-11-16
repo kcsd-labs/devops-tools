@@ -135,7 +135,7 @@ export function until(iso: string): string {
 export function requestLine(r: HelmRequest): string {
   const what =
     r.kind === "upgrade" ? `upgrade · ${r.chart} ${r.fromVersion ?? "?"} → ${r.version}` : `install · ${r.chart} ${r.version}`;
-  return `${what} · ${r.repo}`;
+  return `${what} · ${r.repo}${r.newNamespace ? " · into a new namespace" : ""}`;
 }
 
 export function requestNote(r: HelmRequest): string {
@@ -145,7 +145,7 @@ export function requestNote(r: HelmRequest): string {
     case "installing":
       return `approved by ${r.decider} · ${ago(r.decided)}`;
     case "installed":
-      return `${r.decider === r.requester ? "installed by" : "approved by"} ${r.decider} · ${ago(r.decided)}${r.askedValues ? " · values changed on approval" : ""}`;
+      return `${r.decider === r.requester ? "installed by" : "approved by"} ${r.decider} · ${ago(r.decided)}${r.askedValues ? " · values changed on approval" : ""}${r.grantedRoles?.length ? ` · access given to ${r.grantedRoles.join(", ")}` : ""}`;
     case "failed":
       return r.detail ?? "the install failed";
     case "rejected":

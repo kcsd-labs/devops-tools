@@ -277,7 +277,9 @@ func main() {
 		WithAuditLog(trail).
 		WithSelf(id)
 	if cfg.Catalog.On() {
-		srv.WithCatalog(helmcat.NewHub(cfg.Catalog.ArtifactHub), helmcat.NewFetcher(), catalogRequests(km))
+		requests, templates := catalogStores(km)
+		srv.WithCatalog(helmcat.NewHub(cfg.Catalog.ArtifactHub), helmcat.NewFetcher(), requests).
+			WithCatalogTemplates(templates)
 		slog.Info("helm catalog enabled", "catalog", cfg.Catalog.ArtifactHub, "requestTTL", cfg.Catalog.RequestTTL)
 	}
 
@@ -340,16 +342,17 @@ func unappliedRoles(cfg *config.RBACConfig, st *store.Store) []string {
 	return missing
 }
 
-// catalogRequests is where requests to install from the catalog wait: Secrets
-// beside this service, or memory when it runs outside a cluster.
-func catalogRequests(km *kube.Manager) helmreq.Store {
+// catalogStores is where requests to install from the catalog wait, and the
+// starting values administrators keep for a chart: Secrets beside this
+// service, or memory when it runs outside a cluster.
+func catalogStores(km *kube.Manager) (helmreq.Store, helmreq.Templates) {
 	namespace := os.Getenv("DEVOPS_TOOLS_POD_NAMESPACE")
 	cs, err := km.Clientset("")
 	if namespace == "" || err != nil {
 		slog.Warn("catalog requests are kept in memory and lost on restart: this service does not know its namespace")
-		return helmreq.NewMemory()
+		return helmreq.NewMemory(), helmreq.NewMemoryTemplates()
 	}
-	return helmreq.NewSecrets(cs, namespace)
+	return helmreq.NewSecrets(cs, namespace), helmreq.NewSecretTemplates(cs, namespace)
 }
 
 // accessBackend picks where the access model lives.

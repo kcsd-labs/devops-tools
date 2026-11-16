@@ -3228,9 +3228,152 @@ a.seg-btn {
   opacity: 0.75;
   font-size: 11px;
 }
-.cat-expose {
-  margin: 2px 0 12px;
+.cat-head-actions {
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.cat-view {
+  margin-top: 0;
+}
+.cat-new-ns {
+  margin-top: 6px;
+}
+.cat-template {
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin: 4px 0 6px;
+}
+.cat-question {
+  margin-bottom: 16px;
+}
+.cat-q {
   font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.cat-why {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.cat-chart-says {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-style: italic;
+}
+.cat-asked {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px 2px;
+  margin: 10px 0 14px;
+}
+.cat-asked.open {
+  border-color: color-mix(in srgb, var(--warn) 60%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+.cat-asked.open .cat-q {
+  color: var(--warn);
+}
+.cat-asked-key {
+  font-size: 12px;
+}
+.cat-asked .field {
+  margin-bottom: 10px;
+}
+.cat-replicas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0 10px;
+}
+.cat-template-admin {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.cat-template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cat-simple {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  gap: 14px;
+}
+.cat-simple-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.cat-simple-after {
+  max-height: 45%;
+}
+.cat-simple-after .cat-notes {
+  overflow: auto;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.cat-simple-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cat-simple-head .cat-side-title {
+  margin: 4px 0 8px;
+}
+.cat-simple-values > .cat-grow {
+  flex: 1 1 0;
+  min-height: 120px;
+  position: relative;
+}
+.cat-creates {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.cat-notes-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cat-notes.cat-readme {
+  white-space: normal;
+}
+.cat-empty-values {
+  font-size: 13px;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  padding: 14px;
+}
+.cm-keydoc {
+  max-width: 420px;
+  padding: 6px 9px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.cm-keydoc-path {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  opacity: 0.75;
+  margin-bottom: 3px;
+}
+.cm-keydoc-text.muted {
+  opacity: 0.7;
 }
 .cat-ingress {
   margin-left: 4px;
@@ -3367,4 +3510,31 @@ a.seg-btn {
 .cat-expand {
   margin-left: auto;
   white-space: nowrap;
+}
+/* An administrator's review of a request: its own size, the body scrolls. */
+.modal.cat-review {
+  width: min(1000px, 96vw);
+  max-height: 92vh;
+}
+.cat-grant {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.cat-grant-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  margin: 4px 0;
+}
+.cat-review-notes {
+  margin: 8px 0 4px;
+  font-size: 13px;
+}
+.cat-review-notes .cat-notes-text {
+  height: auto;
+  max-height: 260px;
 }

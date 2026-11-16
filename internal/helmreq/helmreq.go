@@ -61,6 +61,13 @@ type Request struct {
 	AskedValues *string `json:"askedValues,omitempty"`
 	// Objects is what the plan said would be created, for the reviewer.
 	Objects []string `json:"objects,omitempty"`
+	// NewNamespace: the namespace does not exist yet, and is created with
+	// the release. GrantedRoles are the requester's roles given access to it
+	// on approval.
+	NewNamespace bool     `json:"newNamespace,omitempty"`
+	GrantedRoles []string `json:"grantedRoles,omitempty"`
+	// Notes are what the chart says comes after the install: its NOTES.txt.
+	Notes string `json:"notes,omitempty"`
 
 	Requester string     `json:"requester"`
 	Created   time.Time  `json:"created"`

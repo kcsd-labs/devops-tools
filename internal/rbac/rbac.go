@@ -49,6 +49,13 @@ func (a *Authorizer) CloseToExec(patterns []string) {
 	a.noExec = patterns
 }
 
+// Reserved reports whether a namespace is the cluster's or the portal's: one
+// "*" does not reach, or nothing is installed into. A new namespace may not
+// take such a name.
+func (a *Authorizer) Reserved(namespace string) bool {
+	return config.MatchesNamespace(namespace, a.reserved) || config.MatchesNamespace(namespace, a.noExec)
+}
+
 // closedOp is an operation CloseToExec keeps out of the namespaces it names.
 func closedOp(op string) bool {
 	return op == config.OpPodExec || op == config.OpHelmInstall || op == config.OpHelmUpgrade

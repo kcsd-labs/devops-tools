@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"devops-tools/internal/helmreq"
 	"devops-tools/internal/kube"
 	"devops-tools/internal/rbac"
+	"devops-tools/internal/store"
 )
 
 type catalogFixture struct {
@@ -35,16 +37,30 @@ var catalogUsers = map[string][]string{"anna": {"dev"}, "bob": {"dev"}, "root": 
 
 func newCatalogFixture(t *testing.T) *catalogFixture {
 	t.Helper()
-	authz := rbac.New(&config.RBACConfig{Roles: map[string]config.RoleSpec{
+	model := &config.RBACConfig{Roles: map[string]config.RoleSpec{
 		"dev": {Namespaces: []config.NamespaceGrant{{Namespace: "payments-dev",
 			Operations: []string{OpHelmList, OpHelmInstall, OpHelmUpgrade}}}},
 		"admin": {Namespaces: []config.NamespaceGrant{{Namespace: "*", Operations: []string{"*"}}},
 			Global: []string{OpUserManage}},
-	}})
+	}}
+	authz := rbac.New(model)
 	authz.CloseToExec([]string{"kube-*", "devops-tools"})
+	st, err := store.Open(filepath.Join(t.TempDir(), "access.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SeedRoles(model); err != nil {
+		t.Fatal(err)
+	}
+	for name, roles := range catalogUsers {
+		if err := st.CreateLocalUser(name, "", "hash", roles); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cfg := &config.Config{Environment: "test",
 		Catalog: config.CatalogConfig{RequestTTL: 7 * 24 * time.Hour, InstallTimeout: time.Minute}}
-	s := &Server{cfg: cfg, authz: authz, audit: audit.New()}
+	s := &Server{cfg: cfg, authz: authz, audit: audit.New(), store: st,
+		operations: append(config.NamespaceOperations(), config.GlobalOperations()...)}
 	f := &catalogFixture{digest: "sha256:aaa", installed: make(chan map[string]any, 4)}
 
 	s.catalog = &catalog{
@@ -86,6 +102,10 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 		namespaces: func(context.Context) ([]string, error) {
 			return []string{"devops-tools", "payments-dev", "accounts-dev"}, nil
 		},
+		nsExists: func(_ context.Context, ns string) (bool, error) {
+			return ns == "payments-dev" || ns == "accounts-dev" || ns == "devops-tools", nil
+		},
+		templates: helmreq.NewMemoryTemplates(),
 		hints: func(context.Context, string) *kube.ClusterHints {
 			return &kube.ClusterHints{StorageClasses: []kube.StorageClassHint{{Name: "local-path", Default: true}}}
 		},
@@ -326,5 +346,87 @@ func TestFillValues(t *testing.T) {
 	}
 	if code, _ := f.call(t, "anna", "POST", "/api/helm/values/fill", map[string]any{"values": "a: ["}); code != http.StatusBadRequest {
 		t.Errorf("values that are not YAML: %d", code)
+	}
+}
+
+// A new namespace: asked for by a developer who holds nothing in it, made on
+// approval, and given to the requester's role so they keep sight of it.
+func TestRequestIntoANewNamespace(t *testing.T) {
+	f := newCatalogFixture(t)
+	newReqs := "/api/namespaces/team-new/helm/requests"
+	body := func(ns bool) map[string]any {
+		return map[string]any{"kind": "install", "release": "cache", "repo": "bitnami", "chart": "redis",
+			"version": "21.2.3", "values": "", "newNamespace": ns}
+	}
+
+	if code, _ := f.call(t, "anna", "POST", newReqs, body(false)); code != http.StatusForbidden {
+		t.Errorf("a namespace not theirs, not asked as new: %d", code)
+	}
+	for ns, why := range map[string]string{"payments-dev": "exists", "kube-tools": "reserved", "devops-tools": "the portal's", "Bad_Name": "not a name"} {
+		if code, _ := f.call(t, "anna", "POST", "/api/namespaces/"+ns+"/helm/requests", body(true)); code != http.StatusBadRequest {
+			t.Errorf("%s (%s): %d", ns, why, code)
+		}
+	}
+
+	code, q := f.call(t, "anna", "POST", newReqs, body(true))
+	if code != http.StatusCreated || q["newNamespace"] != true {
+		t.Fatalf("request: %d %v", code, q)
+	}
+	id := q["id"].(string)
+
+	// Their own request stays in sight, though the namespace is not theirs.
+	req := httptest.NewRequest("GET", "/api/helm/my-requests", nil)
+	req.Header.Set("X-User", "anna")
+	rec := httptest.NewRecorder()
+	f.h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), id) {
+		t.Errorf("my requests: %s", rec.Body.String())
+	}
+
+	// The approval offers the requester's roles, with what each would get.
+	req = httptest.NewRequest("GET", "/api/helm/requests/"+id+"/grants", nil)
+	req.Header.Set("X-User", "root")
+	rec = httptest.NewRecorder()
+	f.h.ServeHTTP(rec, req)
+	var grants []roleGrant
+	_ = json.Unmarshal(rec.Body.Bytes(), &grants)
+	if len(grants) != 1 || grants[0].Role != "dev" || grants[0].Covered || len(grants[0].Operations) != 3 {
+		t.Fatalf("grants = %+v", grants)
+	}
+
+	if code, out := f.call(t, "root", "POST", "/api/helm/requests/"+id+"/approve", map[string]any{"grant": []string{"admin"}}); code != http.StatusBadRequest {
+		t.Errorf("a role the requester does not hold: %d %v", code, out)
+	}
+	if code, out := f.call(t, "root", "POST", "/api/helm/requests/"+id+"/approve", map[string]any{"grant": []string{"dev"}}); code != http.StatusOK {
+		t.Fatalf("approve: %d %v", code, out)
+	}
+	f.waitInstall(t)
+	if code, _ := f.call(t, "anna", "POST", "/api/namespaces/team-new/helm/check", ask("other", "")); code == http.StatusForbidden {
+		t.Error("the role should reach the new namespace now")
+	}
+}
+
+func TestStartingValues(t *testing.T) {
+	f := newCatalogFixture(t)
+	path := "/api/helm/templates/bitnami/redis"
+	if code, _ := f.call(t, "anna", "PUT", path, map[string]string{"values": "a: 1"}); code != http.StatusForbidden {
+		t.Errorf("a developer saving starting values: %d", code)
+	}
+	if code, _ := f.call(t, "root", "PUT", path, map[string]string{"values": "a: ["}); code != http.StatusBadRequest {
+		t.Errorf("values that are not YAML: %d", code)
+	}
+	code, out := f.call(t, "root", "PUT", path, map[string]string{"values": "global:\n  domain: example.com\n", "note": "our domain"})
+	if code != http.StatusOK || out["author"] != "root" {
+		t.Fatalf("save: %d %v", code, out)
+	}
+	_, info := f.call(t, "anna", "GET", "/api/helm/catalog/bitnami/redis?version=21.2.3", nil)
+	if tpl, _ := info["template"].(map[string]any); tpl == nil || tpl["note"] != "our domain" {
+		t.Errorf("the chart should come with its starting values: %v", info["template"])
+	}
+	if code, _ := f.call(t, "root", "DELETE", path, nil); code != http.StatusOK {
+		t.Errorf("remove: %d", code)
+	}
+	if _, info := f.call(t, "anna", "GET", "/api/helm/catalog/bitnami/redis?version=21.2.3", nil); info["template"] != nil {
+		t.Errorf("removed, still there: %v", info["template"])
 	}
 }

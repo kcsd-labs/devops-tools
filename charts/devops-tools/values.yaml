@@ -425,7 +425,8 @@ config:
   # chart is rendered and checked first, and what reaches past the namespace —
   # cluster-wide objects, resource definitions, privileged pods, images not
   # found — is shown as a warning to whoever approves. Needs rbac.fullAccess: the
-  # portal's own account installs whatever the chart holds.
+  # portal's own account installs whatever the chart holds — and creates the
+  # namespace a request asks for, when it is approved.
   catalog:
     enabled: true
     artifactHub: https://artifacthub.io

@@ -94,6 +94,20 @@ type ReleasePlan struct {
 	Problems []PlanProblem `json:"problems"`
 	// Images are what the pods would run, for the registry check.
 	Images []string `json:"images"`
+	// Notes are what the chart says comes after the install — its
+	// NOTES.txt, rendered with these values.
+	Notes string `json:"notes,omitempty"`
+	// Required are values the chart refused to render without, read from
+	// its error, so they can be asked for one by one.
+	Required []RequiredValue `json:"required,omitempty"`
+	// NewNamespace: the namespace does not exist yet; it would be created.
+	NewNamespace bool `json:"newNamespace,omitempty"`
+}
+
+// RequiredValue is a key a chart asked for, with what it said.
+type RequiredValue struct {
+	Key  string `json:"key"`
+	Said string `json:"said"`
 }
 
 // OK reports whether nothing in the plan stops the install.
@@ -139,6 +153,26 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		}
 	}
 
+	exists, err := m.NamespaceExists(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		if upgrade {
+			plan.fail("there is no namespace %s to upgrade in", namespace)
+			return plan, nil
+		}
+		// Nothing to ask the cluster about a namespace that is not there:
+		// rendered as helm template would, it is created with the release.
+		plan.NewNamespace = true
+		rel, err := m.renderOffline(namespace, name, ch, vals)
+		if err != nil {
+			plan.notRendered(err, ch)
+			return plan, nil
+		}
+		return m.finishPlan(plan, rel, defined, namespace)
+	}
+
 	cfg, _, err := m.helmActionConfig("", namespace)
 	if err != nil {
 		return nil, err
@@ -176,10 +210,25 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		rel, err = m.renderOffline(namespace, name, ch, vals)
 	}
 	if err != nil {
-		plan.fail("the chart does not render with these values: %s", trimHelmError(err))
+		plan.notRendered(err, ch)
 		return plan, nil
 	}
+	return m.finishPlan(plan, rel, defined, namespace)
+}
 
+// notRendered records why a chart did not render, and the values it named
+// as missing.
+func (p *ReleasePlan) notRendered(err error, ch *chart.Chart) {
+	msg := trimHelmError(err)
+	p.fail("the chart does not render with these values: %s", msg)
+	p.Required = requiredValues(err.Error(), ch.Metadata.Name)
+}
+
+// finishPlan checks every object a rendered release would create.
+func (m *Manager) finishPlan(plan *ReleasePlan, rel *release.Release, defined map[schema.GroupKind]bool, namespace string) (*ReleasePlan, error) {
+	if rel.Info != nil {
+		plan.Notes = shorten(strings.TrimSpace(rel.Info.Notes), 4000)
+	}
 	mapper, err := newRESTClientGetter(m.restConfig(""), namespace).ToRESTMapper()
 	if err != nil {
 		return nil, fmt.Errorf("read the cluster's kinds: %w", err)

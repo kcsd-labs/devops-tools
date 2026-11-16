@@ -57,17 +57,40 @@ export interface CatalogChart extends CatalogPackage {
   settings: CatalogSettings;
   /** What the cluster offers; only when a namespace was given. */
   cluster?: ClusterHints;
+  /** What the chart says about each of its keys, a.b.c → words ("" when nothing). */
+  docs: Record<string, string>;
+  /** The starting values administrators keep for this chart. */
+  template?: HelmTemplate;
+  /** Why a new namespace by the asked name will not do. */
+  namespaceProblem?: string;
+}
+
+export interface HelmTemplate {
+  repo: string;
+  chart: string;
+  values: string;
+  note?: string;
+  author: string;
+  updated: string;
 }
 
 export interface IngressSpot {
   path: string;
-  shape: "hostname" | "hosts" | "hostlist";
+  shape: "hostname" | "hosts" | "hostlist" | "domain";
   classKey: string;
 }
 
 export interface CatalogSettings {
   storage: string[];
   ingresses: IngressSpot[];
+  /** Bitnami's resourcesPreset keys. */
+  presets: string[];
+  /** persistence.size keys. */
+  disks: string[];
+  /** replicaCount keys. */
+  replicas: string[];
+  /** The chart's own value at each of the paths above. */
+  defaults: Record<string, string>;
 }
 
 export interface ClusterHints {
@@ -82,6 +105,13 @@ export interface ValuesFill {
   storageClass?: string;
   storagePaths?: string[];
   ingress?: IngressSpot & { host: string; class: string; tls: string };
+  preset?: string;
+  presetPaths?: string[];
+  disk?: string;
+  diskPaths?: string[];
+  replicas?: Record<string, number>;
+  /** Values typed for keys the chart asked for. */
+  set?: Record<string, string>;
 }
 
 export interface CatalogProblem {
@@ -98,6 +128,12 @@ export interface CatalogCheck {
   images: string[];
   imageStates: { image: string; missing?: boolean; unknown?: string }[];
   fromVersion?: string;
+  /** The chart's NOTES.txt, rendered: what comes after the install. */
+  notes?: string;
+  /** Keys the chart refused to render without. */
+  required?: { key: string; said: string }[];
+  /** The namespace does not exist yet. */
+  newNamespace?: boolean;
 }
 
 export interface CatalogAsk {
@@ -107,6 +143,8 @@ export interface CatalogAsk {
   chart: string;
   version: string;
   values: string;
+  /** Create the namespace with the release. */
+  newNamespace?: boolean;
 }
 
 export interface HelmRequest {
@@ -131,6 +169,18 @@ export interface HelmRequest {
   decided?: string;
   comment?: string;
   detail?: string;
+  /** The namespace is created on approval. */
+  newNamespace?: boolean;
+  grantedRoles?: string[];
+  notes?: string;
+}
+
+/** One of a requester's roles, as an approval offers to give it a new namespace. */
+export interface RoleGrant {
+  role: string;
+  operations: string[];
+  /** Reaches the namespace already, through "*". */
+  covered: boolean;
 }
 
 /** A failed catalog call: the server's own words, and the check when one failed. */
@@ -943,7 +993,8 @@ export function createApi(token: string | undefined) {
 
     /** The namespaces a chart may be installed into. */
     catalogNamespaces: () => catalogCall<{ namespaces: string[] }>("GET", "/helm/namespaces"),
-    catalogAccess: () => catalogCall<{ install: boolean; upgrade: boolean; direct: boolean }>("GET", "/helm/access"),
+    catalogAccess: () =>
+      catalogCall<{ install: boolean; upgrade: boolean; direct: boolean; newNamespace: boolean }>("GET", "/helm/access"),
     /** Releases installed from the catalog, in every namespace the caller may ask in. */
     catalogReleases: () =>
       catalogCall<(HelmRelease & { mayUpgrade: boolean; mayList: boolean })[]>("GET", "/helm/catalog-releases"),
@@ -953,10 +1004,11 @@ export function createApi(token: string | undefined) {
         `/helm/catalog?q=${encodeURIComponent(q)}&offset=${offset}`
       ),
     /** One version of a chart; with a namespace, a release name free there. */
-    catalogChart: (repo: string, chart: string, version = "", ns = "") => {
+    catalogChart: (repo: string, chart: string, version = "", ns = "", newNamespace = false) => {
       const q = new URLSearchParams();
       if (version) q.set("version", version);
       if (ns) q.set("namespace", ns);
+      if (newNamespace) q.set("new", "1");
       return catalogCall<CatalogChart>(
         "GET",
         `/helm/catalog/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}?${q.toString()}`
@@ -971,7 +1023,6 @@ export function createApi(token: string | undefined) {
       catalogCall<CatalogCheck>("POST", `/namespaces/${ns}/helm/check`, ask),
     catalogRequest: (ns: string, ask: CatalogAsk) =>
       catalogCall<HelmRequest>("POST", `/namespaces/${ns}/helm/requests`, ask),
-    /** Writes what was filled from the cluster into the values. */
     /** Brings the values from what `previous` filled in to what `fill` does;
         `kept` are keys changed by hand since, which the form leaves alone. */
     fillValues: (values: string, fill: ValuesFill, previous: ValuesFill) =>
@@ -984,8 +1035,19 @@ export function createApi(token: string | undefined) {
     requestCount: () => catalogCall<{ waiting: number }>("GET", "/helm/requests/count"),
     checkRequest: (id: string, values: string) =>
       catalogCall<CatalogCheck>("POST", `/helm/requests/${id}/check`, { values }),
-    approveRequest: (id: string, values: string) =>
-      catalogCall<HelmRequest>("POST", `/helm/requests/${id}/approve`, { values }),
+    approveRequest: (id: string, values: string, grant: string[] = []) =>
+      catalogCall<HelmRequest>("POST", `/helm/requests/${id}/approve`, { values, grant }),
+    requestGrants: (id: string) => catalogCall<RoleGrant[]>("GET", `/helm/requests/${id}/grants`),
+    saveTemplate: (repo: string, chart: string, values: string, note: string) =>
+      catalogCall<HelmTemplate>("PUT", `/helm/templates/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`, {
+        values,
+        note,
+      }),
+    deleteTemplate: (repo: string, chart: string) =>
+      catalogCall<{ status: string }>(
+        "DELETE",
+        `/helm/templates/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`
+      ),
     rejectRequest: (id: string, comment: string) =>
       catalogCall<HelmRequest>("POST", `/helm/requests/${id}/reject`, { comment }),
 

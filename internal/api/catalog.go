@@ -56,6 +56,10 @@ type catalog struct {
 	// hints is what the cluster offers for a namespace: storage classes,
 	// ingress class, domain, certificates.
 	hints func(ctx context.Context, ns string) *kube.ClusterHints
+	// nsExists says whether a namespace is there; a new one is asked for.
+	nsExists func(ctx context.Context, ns string) (bool, error)
+	// templates are the starting values administrators keep per chart.
+	templates helmreq.Templates
 }
 
 // WithCatalog switches the catalog on.
@@ -68,6 +72,8 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 	c.releases = func(ns string) ([]kube.HelmRelease, error) { return s.kube.ListReleases("", ns) }
 	c.fromCatalog = s.kube.ListCatalogReleases
 	c.hints = s.kube.GetClusterHints
+	c.nsExists = s.kube.NamespaceExists
+	c.templates = helmreq.NewMemoryTemplates()
 	c.namespaces = func(ctx context.Context) ([]string, error) {
 		return s.kube.ListNamespaces(ctx, "", s.cfg.Cluster.HiddenNamespaces)
 	}
@@ -83,6 +89,15 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 		return loc, a, nil
 	}
 	s.catalog = c
+	return s
+}
+
+// WithCatalogTemplates keeps administrators' starting values somewhere that
+// outlives the process.
+func (s *Server) WithCatalogTemplates(t helmreq.Templates) *Server {
+	if s.catalog != nil && t != nil {
+		s.catalog.templates = t
+	}
 	return s
 }
 
@@ -107,13 +122,19 @@ func (s *Server) catalogRoutes(r chi.Router, base string) {
 	r.Get(base+"/helm/releases/{name}/catalog", s.requireOp(OpHelmUpgrade, s.handleCatalogRelease))
 	r.Post(base+"/helm/check", s.handleCatalogCheck)
 	r.Post(base+"/helm/requests", s.handleCreateRequest)
-	r.Delete(base+"/helm/requests/{id}", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade, OpHelmList}, s.handleWithdrawRequest))
+	// Withdrawing is the requester's, or an administrator's — a request for a
+	// new namespace is one its requester holds nothing in yet.
+	r.Delete(base+"/helm/requests/{id}", s.requirePackages(s.handleWithdrawRequest))
 
 	r.Get("/helm/requests", s.requireGlobalOp(OpUserManage, s.handleAllRequests))
 	r.Get("/helm/requests/count", s.requireGlobalOp(OpUserManage, s.handleRequestCount))
 	r.Post("/helm/requests/{id}/check", s.requireGlobalOp(OpUserManage, s.handleCheckRequest))
 	r.Post("/helm/requests/{id}/approve", s.requireGlobalOp(OpUserManage, s.handleApproveRequest))
 	r.Post("/helm/requests/{id}/reject", s.requireGlobalOp(OpUserManage, s.handleRejectRequest))
+	r.Get("/helm/requests/{id}/grants", s.requireGlobalOp(OpUserManage, s.handleRequestGrants))
+
+	r.Put("/helm/templates/{repo}/{chart}", s.requireGlobalOp(OpUserManage, s.handleSaveTemplate))
+	r.Delete("/helm/templates/{repo}/{chart}", s.requireGlobalOp(OpUserManage, s.handleDeleteTemplate))
 }
 
 // requireAnyOp is requireOp for an endpoint either of two grants opens.
@@ -172,7 +193,35 @@ func (s *Server) handleCatalogAccess(w http.ResponseWriter, r *http.Request) {
 		"upgrade": len(s.authz.NamespacesForOp(user.Roles, OpHelmUpgrade)) > 0,
 		// An administrator's install needs no request.
 		"direct": s.isApprover(user.Roles),
+		// A new namespace can be asked for by whoever may install somewhere.
+		"newNamespace": s.mayInstallSomewhere(user.Roles),
 	})
+}
+
+// mayInstallSomewhere reports whether these roles may ask for an install in
+// some namespace — and so for one into a new namespace.
+func (s *Server) mayInstallSomewhere(roles []string) bool {
+	return len(s.authz.NamespacesForOp(roles, OpHelmInstall)) > 0
+}
+
+var namespaceRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
+// newNamespaceProblem says why ns cannot be a new namespace, or "".
+func (s *Server) newNamespaceProblem(ctx context.Context, ns string) string {
+	if !namespaceRE.MatchString(ns) {
+		return "a namespace name is lower-case letters, digits and dashes, at most 63 long"
+	}
+	if s.authz.Reserved(ns) {
+		return ns + " is reserved for the cluster or the portal"
+	}
+	exists, err := s.catalog.nsExists(ctx, ns)
+	if err != nil {
+		return "could not check the namespace: " + err.Error()
+	}
+	if exists {
+		return ns + " already exists — pick it from the list, or ask for access to it"
+	}
+	return ""
 }
 
 // mayAskFor reports whether these roles may ask for an install or an upgrade
@@ -264,6 +313,12 @@ type chartInfo struct {
 	// Cluster what it fills them with — the latter only with a namespace.
 	Settings helmcat.Settings   `json:"settings"`
 	Cluster  *kube.ClusterHints `json:"cluster,omitempty"`
+	// Docs are what the chart says about each of its keys.
+	Docs map[string]string `json:"docs"`
+	// Template is what administrators keep as the chart's starting values.
+	Template *helmreq.Template `json:"template,omitempty"`
+	// NamespaceProblem says why a new namespace by that name will not do.
+	NamespaceProblem string `json:"namespaceProblem,omitempty"`
 }
 
 func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
@@ -275,19 +330,31 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := chartInfo{Located: loc, Digest: arc.Digest, Schema: len(arc.Chart.Schema) > 0,
-		Settings: helmcat.Detect(arc.Chart.Values)}
+		Settings: helmcat.Detect(arc.Chart.Values), Docs: map[string]string{}}
 	for _, f := range arc.Chart.Raw {
 		if f.Name == "values.yaml" {
 			info.Defaults = string(f.Data)
+			info.Docs = helmcat.Docs(f.Data)
 		}
+	}
+	if t, err := s.catalog.templates.Get(r.Context(), loc.Repo, loc.Name); err == nil {
+		info.Template = t
+	}
+	isNew := r.URL.Query().Get("new") == "1"
+	if isNew && ns != "" && s.mayInstallSomewhere(user.Roles) {
+		// A namespace to be: nothing in it to probe, the cluster's own hints.
+		info.SuggestedName = loc.Name
+		if info.NamespaceProblem = s.newNamespaceProblem(r.Context(), ns); info.NamespaceProblem == "" {
+			info.Cluster = s.catalog.hints(r.Context(), ns)
+		}
+		writeJSON(w, http.StatusOK, info)
+		return
 	}
 	// A free name only where the caller may look: the names in a namespace
 	// are not theirs to probe otherwise.
 	if ns != "" && s.mayAskFor(user.Roles, ns) {
 		info.SuggestedName = s.freeReleaseName(ns, loc.Name)
-		if len(info.Settings.Storage) > 0 || len(info.Settings.Ingresses) > 0 {
-			info.Cluster = s.catalog.hints(r.Context(), ns)
-		}
+		info.Cluster = s.catalog.hints(r.Context(), ns)
 	} else {
 		info.SuggestedName = loc.Name
 	}
@@ -361,6 +428,8 @@ type catalogAsk struct {
 	Chart   string `json:"chart"`
 	Version string `json:"version"`
 	Values  string `json:"values"`
+	// NewNamespace asks for the namespace to be created with the release.
+	NewNamespace bool `json:"newNamespace"`
 }
 
 // checkResult is a plan, with what the registries said about its images.
@@ -393,7 +462,20 @@ func (s *Server) readAsk(w http.ResponseWriter, r *http.Request) (*catalogAsk, b
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind is install or upgrade"})
 		return nil, false
 	}
-	if !s.authz.Allowed(user.Roles, ns, op) {
+	if ask.NewNamespace {
+		// Nobody holds anything in a namespace that is not there yet: whoever
+		// may install somewhere may ask for one, and an administrator decides.
+		if ask.Kind != helmreq.KindInstall || !s.mayInstallSomewhere(user.Roles) {
+			s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
+				Operation: op, Target: ask.Release, Allowed: false})
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return nil, false
+		}
+		if problem := s.newNamespaceProblem(r.Context(), ns); problem != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": problem})
+			return nil, false
+		}
+	} else if !s.authz.Allowed(user.Roles, ns, op) {
 		s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
 			Operation: op, Target: ask.Release, Allowed: false})
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -538,7 +620,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		Repo: ask.Repo, Chart: ask.Chart, Version: ask.Version, FromVersion: res.FromVersion,
 		Digest: res.Digest, Values: ask.Values, Objects: objectList(res.ReleasePlan),
 		Requester: user.Username, Created: now, Expires: now.Add(s.cfg.Catalog.RequestTTL),
-		Status: helmreq.StatusWaiting,
+		Status: helmreq.StatusWaiting, NewNamespace: ask.NewNamespace, Notes: res.Notes,
 	}
 	direct := s.isApprover(user.Roles)
 	if direct {
@@ -583,6 +665,9 @@ func requestDetail(q *helmreq.Request, vals map[string]any) string {
 	if keys := valueKeys(vals); len(keys) > 0 {
 		d += "; values: " + strings.Join(keys, ", ")
 	}
+	if q.NewNamespace {
+		d += "; new namespace"
+	}
 	return d
 }
 
@@ -625,7 +710,8 @@ func (s *Server) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []*helmreq.Request{}
 	for _, q := range all {
-		if s.mayAskFor(user.Roles, q.Namespace) || s.authz.Allowed(user.Roles, q.Namespace, OpHelmList) {
+		if q.Requester == user.Username || s.mayAskFor(user.Roles, q.Namespace) ||
+			s.authz.Allowed(user.Roles, q.Namespace, OpHelmList) {
 			out = append(out, q)
 		}
 	}
@@ -716,6 +802,8 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var body struct {
 		Values *string `json:"values"`
+		// Grant are the requester's roles to give the new namespace to.
+		Grant []string `json:"grant"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request does not read: " + err.Error()})
@@ -729,6 +817,22 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	if !q.Open() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "the request is already " + q.Status})
 		return
+	}
+	if len(body.Grant) > 0 {
+		if !q.NewNamespace {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "access is given only with a new namespace"})
+			return
+		}
+		held := map[string]bool{}
+		for _, role := range s.store.RolesFor(q.Requester) {
+			held[role] = true
+		}
+		for _, role := range body.Grant {
+			if !held[role] {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": q.Requester + " does not hold the role " + role})
+				return
+			}
+		}
 	}
 	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values}
 	changed := body.Values != nil && strings.TrimSpace(*body.Values) != strings.TrimSpace(q.Values)
@@ -757,11 +861,19 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		q.Status, q.Decider, q.Decided = helmreq.StatusInstalling, user.Username, &now
 		q.Objects = objectList(res.ReleasePlan)
+		q.Notes = res.Notes
+		q.GrantedRoles = body.Grant
 		return nil
 	})
 	if err != nil {
 		requestError(w, err)
 		return
+	}
+	// Access before the install: the requester follows it from the start.
+	for _, role := range body.Grant {
+		if err := s.grantNamespace(r, role, q.Namespace); err != nil {
+			slog.Error("give a role a new namespace", "role", role, "namespace", q.Namespace, "err", err)
+		}
 	}
 	detail := requestDetail(q, vals) + "; requested by " + q.Requester
 	if changed {
@@ -833,6 +945,11 @@ func (s *Server) startInstall(q *helmreq.Request, ch *chart.Chart, vals map[stri
 // runInstall is the installer the cluster provides.
 func (s *Server) runInstall(ctx context.Context, q *helmreq.Request, ch *chart.Chart, vals map[string]any) error {
 	labels := kube.CatalogLabels(q.Repo, q.Chart)
+	if q.NewNamespace && q.Kind == helmreq.KindInstall {
+		if err := s.kube.CreateNamespace(ctx, q.Namespace, q.Requester); err != nil {
+			return fmt.Errorf("create the namespace %s: %w", q.Namespace, err)
+		}
+	}
 	if q.Kind == helmreq.KindUpgrade {
 		return s.kube.UpgradeRelease(ctx, q.Namespace, q.Release, ch, vals, labels, s.cfg.Catalog.InstallTimeout)
 	}
