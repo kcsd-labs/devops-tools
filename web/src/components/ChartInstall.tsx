@@ -64,8 +64,20 @@ export function ChartInstall(props: InstallProps) {
   const [checkError, setCheckError] = useState("");
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  // The whole window for the values, with the chart's defaults beside them.
+  // The tab being looked at, alone on the whole window.
   const [expanded, setExpanded] = useState(false);
+
+  // Esc goes back from the whole window — unless it closes CodeMirror's
+  // search panel.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || (e.target as HTMLElement | null)?.closest?.(".cm-editor")) return;
+      setExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
 
   // Where it may go: the namespaces the caller may install into, the one
   // used last offered first.
@@ -169,19 +181,9 @@ export function ChartInstall(props: InstallProps) {
               </div>
             </div>
           </div>
-          <div className="row" style={{ gap: 8 }}>
-            <button
-              className="icon-btn"
-              onClick={() => setExpanded((x) => !x)}
-              aria-label={expanded ? "Make smaller" : "Use the whole window"}
-              title={expanded ? "Make smaller" : "Use the whole window — values and chart defaults side by side"}
-            >
-              {expanded ? "⤡" : "⤢"}
-            </button>
-            <button className="icon-btn" onClick={props.onClose} aria-label="Close">
-              ✕
-            </button>
-          </div>
+          <button className="icon-btn" onClick={props.onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
         <div className="modal-body pad">
           {loadError && <div className="alert">{loadError}</div>}
@@ -191,131 +193,139 @@ export function ChartInstall(props: InstallProps) {
           )}
           {info && (
             <>
-              <div className="muted cat-desc">
-                {info.description} <span className="mono">· {info.repoUrl}</span>
-              </div>
-              <div className="cat-fields">
-                <div className="field">
-                  <label className="muted">Release name</label>
-                  <input
-                    className="input mono"
-                    value={release}
-                    disabled={kind === "upgrade"}
-                    onChange={(e) => {
-                      setNameTouched(true);
-                      setRelease(e.target.value.toLowerCase());
-                    }}
-                  />
+              {!expanded && (
+                <>
+                <div className="muted cat-desc">
+                  {info.description} <span className="mono">· {info.repoUrl}</span>
                 </div>
-                <div className="field">
-                  <label className="muted">Namespace</label>
-                  {fixedNamespace ? (
-                    <input className="input mono" value={namespace} disabled />
-                  ) : (
-                    <select
+                <div className="cat-fields">
+                  <div className="field">
+                    <label className="muted">Release name</label>
+                    <input
                       className="input mono"
-                      value={namespace}
-                      onChange={(e) => setNamespace(e.target.value)}
-                      disabled={!namespaces?.length}
-                    >
-                      {(namespaces ?? []).map((ns) => (
-                        <option key={ns} value={ns}>
-                          {ns}
+                      value={release}
+                      disabled={kind === "upgrade"}
+                      onChange={(e) => {
+                        setNameTouched(true);
+                        setRelease(e.target.value.toLowerCase());
+                      }}
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="muted">Namespace</label>
+                    {fixedNamespace ? (
+                      <input className="input mono" value={namespace} disabled />
+                    ) : (
+                      <select
+                        className="input mono"
+                        value={namespace}
+                        onChange={(e) => setNamespace(e.target.value)}
+                        disabled={!namespaces?.length}
+                      >
+                        {(namespaces ?? []).map((ns) => (
+                          <option key={ns} value={ns}>
+                            {ns}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div className="field">
+                    <label className="muted">
+                      Version{props.fromVersion ? ` (now ${props.fromVersion})` : ""}
+                    </label>
+                    <select className="input" value={version} onChange={(e) => setVersion(e.target.value)}>
+                      {info.versions.slice(0, 60).map((v, i) => (
+                        <option key={v.version} value={v.version}>
+                          {v.version}
+                          {v.appVersion ? ` · app ${v.appVersion}` : ""}
+                          {i === 0 ? " (latest)" : ""}
+                          {v.prerelease ? " · pre-release" : ""}
                         </option>
                       ))}
                     </select>
-                  )}
+                  </div>
                 </div>
-                <div className="field">
-                  <label className="muted">
-                    Version{props.fromVersion ? ` (now ${props.fromVersion})` : ""}
-                  </label>
-                  <select className="input" value={version} onChange={(e) => setVersion(e.target.value)}>
-                    {info.versions.slice(0, 60).map((v, i) => (
-                      <option key={v.version} value={v.version}>
-                        {v.version}
-                        {v.appVersion ? ` · app ${v.appVersion}` : ""}
-                        {i === 0 ? " (latest)" : ""}
-                        {v.prerelease ? " · pre-release" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
 
-              <div className="seg-switch cat-tabs">
-                <button className={tab === "values" ? "on" : ""} onClick={() => setTab("values")}>
-                  {expanded ? "Values and defaults" : "Your values"}
-                </button>
-                {!expanded && (
+                </>
+              )}
+
+              <div className="cat-tabbar">
+                <div className="seg-switch cat-tabs">
+                  <button className={tab === "values" ? "on" : ""} onClick={() => setTab("values")}>
+                    Your values
+                  </button>
                   <button className={tab === "defaults" ? "on" : ""} onClick={() => setTab("defaults")}>
                     Chart defaults
                   </button>
+                  <button className={tab === "readme" ? "on" : ""} onClick={() => setTab("readme")}>
+                    README
+                  </button>
+                </div>
+                {expanded && (
+                  <span className="muted mono cat-where">
+                    {release} in {namespace} · {version}
+                  </span>
                 )}
-                <button className={tab === "readme" ? "on" : ""} onClick={() => setTab("readme")}>
-                  README
+                <button
+                  className="btn ghost sm cat-expand"
+                  onClick={() => setExpanded((x) => !x)}
+                  title={expanded ? "Back to the dialog (Esc)" : "Show this tab on the whole window"}
+                >
+                  {expanded ? "↙ Back to normal size" : "↗ Full screen"}
                 </button>
               </div>
-              {(tab === "values" || (expanded && tab === "defaults")) && (
-                <div className={expanded ? "cat-split" : ""}>
-                  <div>
-                    {info.cluster && kind === "install" && (
-                      <FillFromCluster
-                        settings={info.settings}
-                        hints={info.cluster}
-                        release={release}
-                        values={values}
-                        onValues={setValues}
-                      />
-                    )}
-                    {!info.cluster && kind === "install" && info.settings.storage.length + info.settings.ingresses.length === 0 && (
-                      <div className="field-hint">
-                        This chart has no storage class or ingress setting the portal recognises. Once it runs, its
-                        service can be exposed from Services → Expose.
-                      </div>
-                    )}
+
+              {tab === "values" && (
+                <>
+                  {info.cluster && kind === "install" && (
+                    <FillFromCluster
+                      settings={info.settings}
+                      hints={info.cluster}
+                      release={release}
+                      values={values}
+                      onValues={setValues}
+                    />
+                  )}
+                  {!info.cluster && kind === "install" && info.settings.storage.length + info.settings.ingresses.length === 0 && (
                     <div className="field-hint">
-                      {kind === "upgrade"
-                        ? "What this release was given last time, on top of the chart's defaults. Change what you need."
-                        : "Only what differs from the chart's defaults. Empty installs the chart as its author ships it — passwords it needs are generated by the chart itself."}
+                      This chart has no storage class or ingress setting the portal recognises. Once it runs, its
+                      service can be exposed from Services → Expose.
                     </div>
+                  )}
+                  <div className="field-hint">
+                    {kind === "upgrade"
+                      ? "What this release was given last time, on top of the chart's defaults. Change what you need."
+                      : "Only what differs from the chart's defaults. Empty installs the chart as its author ships it — passwords it needs are generated by the chart itself."}
+                  </div>
+                  <div className={expanded ? "cat-grow" : ""}>
                     <CodeMirror
                       value={values}
                       theme={theme}
-                      height={expanded ? "calc(100vh - 470px)" : "240px"}
+                      height={expanded ? "100%" : "240px"}
                       extensions={[yaml()]}
                       placeholder={"# e.g.\n# replicaCount: 2\n# resources:\n#   limits: { memory: 512Mi }"}
                       onChange={setValues}
                     />
                   </div>
-                  {expanded && (
-                    <div>
-                      <div className="field-hint">Chart defaults — read only; Ctrl+F searches</div>
-                      <CodeMirror
-                        value={info.defaults}
-                        theme={theme}
-                        height="calc(100vh - 290px)"
-                        extensions={[yaml(), EditorView.lineWrapping]}
-                        editable={false}
-                      />
-                    </div>
-                  )}
-                </div>
+                </>
               )}
-              {!expanded && tab === "defaults" && (
+              {tab === "defaults" && (
                 <>
-                  <div className="field-hint">Read only; Ctrl+F searches. ⤢ puts them beside your values.</div>
-                  <CodeMirror
-                    value={info.defaults}
-                    theme={theme}
-                    height="290px"
-                    extensions={[yaml(), EditorView.lineWrapping]}
-                    editable={false}
-                  />
+                  <div className="field-hint">Read only; Ctrl+F searches.</div>
+                  <div className={expanded ? "cat-grow" : ""}>
+                    <CodeMirror
+                      value={info.defaults}
+                      theme={theme}
+                      height={expanded ? "100%" : "290px"}
+                      extensions={[yaml(), EditorView.lineWrapping]}
+                      editable={false}
+                    />
+                  </div>
                 </>
               )}
               {tab === "readme" && (
-                <div className={"cat-readme cat-readme-md" + (expanded ? " tall" : "")}>
+                <div className={"cat-readme cat-readme-md" + (expanded ? " cat-grow" : "")}>
                   {info.readme ? <Markdown source={info.readme} /> : "The chart has no README."}
                 </div>
               )}

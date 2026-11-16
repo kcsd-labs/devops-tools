@@ -3158,16 +3158,48 @@ a.seg-btn {
   height: calc(100vh - 24px);
   max-height: none;
 }
+/* On the whole window the open tab takes all the height left. */
 .modal.cat-install.expanded .modal-body {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
-.cat-split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
+.modal.cat-install.expanded .modal-body > * {
+  flex-shrink: 0;
 }
-.cat-readme.tall {
-  height: calc(100vh - 360px);
+.modal.cat-install.expanded .modal-body > .cat-grow {
+  flex: 1 1 0;
+  min-height: 160px;
+  position: relative;
+}
+.cat-grow > .cm-theme,
+.cat-grow > div:only-child {
+  position: absolute;
+  inset: 0;
+}
+.cat-readme.cat-grow {
+  height: auto;
+}
+.cat-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+.cat-tabbar .cat-tabs {
+  margin: 0;
+}
+.cat-where {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cat-expand {
+  margin-left: auto;
+  white-space: nowrap;
 }
 .cat-fill {
   border: 1px solid var(--border);
@@ -3203,7 +3235,6 @@ a.seg-btn {
   margin: 4px 0 8px 24px;
 }
 @media (max-width: 900px) {
-  .cat-split,
   .cat-fill-ingress {
     grid-template-columns: 1fr;
   }
