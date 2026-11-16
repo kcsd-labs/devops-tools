@@ -86,6 +86,9 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 		namespaces: func(context.Context) ([]string, error) {
 			return []string{"devops-tools", "payments-dev", "accounts-dev"}, nil
 		},
+		hints: func(context.Context, string) *kube.ClusterHints {
+			return &kube.ClusterHints{StorageClasses: []kube.StorageClassHint{{Name: "local-path", Default: true}}}
+		},
 		fromCatalog: func() ([]kube.HelmRelease, error) {
 			return []kube.HelmRelease{
 				{Name: "redis", Namespace: "payments-dev", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "redis"}},
@@ -307,5 +310,19 @@ func TestPackagesAcrossNamespaces(t *testing.T) {
 	defer delete(catalogUsers, "nobody")
 	if code, _ := f.call(t, "nobody", "GET", "/api/helm/catalog?q=redis", nil); code != http.StatusForbidden {
 		t.Errorf("the catalog for someone with no grant: %d", code)
+	}
+}
+
+func TestFillValues(t *testing.T) {
+	f := newCatalogFixture(t)
+	code, out := f.call(t, "anna", "POST", "/api/helm/values/fill", map[string]any{
+		"values": "replicas: 2\n", "storageClass": "local-path", "storagePaths": []string{"global.defaultStorageClass"},
+	})
+	if code != http.StatusOK || !strings.Contains(out["values"].(string), "defaultStorageClass: local-path") ||
+		!strings.Contains(out["values"].(string), "replicas: 2") {
+		t.Errorf("fill: %d %v", code, out)
+	}
+	if code, _ := f.call(t, "anna", "POST", "/api/helm/values/fill", map[string]any{"values": "a: ["}); code != http.StatusBadRequest {
+		t.Errorf("values that are not YAML: %d", code)
 	}
 }

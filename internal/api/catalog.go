@@ -53,6 +53,9 @@ type catalog struct {
 	// fromCatalog lists every release installed from the catalog, in every
 	// namespace.
 	fromCatalog func() ([]kube.HelmRelease, error)
+	// hints is what the cluster offers for a namespace: storage classes,
+	// ingress class, domain, certificates.
+	hints func(ctx context.Context, ns string) *kube.ClusterHints
 }
 
 // WithCatalog switches the catalog on.
@@ -64,6 +67,7 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 	c.trouble = s.kube.ReleaseTrouble
 	c.releases = func(ns string) ([]kube.HelmRelease, error) { return s.kube.ListReleases("", ns) }
 	c.fromCatalog = s.kube.ListCatalogReleases
+	c.hints = s.kube.GetClusterHints
 	c.namespaces = func(ctx context.Context) ([]string, error) {
 		return s.kube.ListNamespaces(ctx, "", s.cfg.Cluster.HiddenNamespaces)
 	}
@@ -97,6 +101,7 @@ func (s *Server) catalogRoutes(r chi.Router, base string) {
 	r.Get("/helm/catalog/{repo}/{chart}", s.requirePackages(s.handleCatalogChart))
 	r.Get("/helm/catalog-releases", s.requirePackages(s.handleCatalogReleases))
 	r.Get("/helm/my-requests", s.requirePackages(s.handleMyRequests))
+	r.Post("/helm/values/fill", s.requirePackages(s.handleFillValues))
 
 	// Acting in one namespace is checked against that namespace.
 	r.Get(base+"/helm/releases/{name}/catalog", s.requireOp(OpHelmUpgrade, s.handleCatalogRelease))
@@ -255,6 +260,10 @@ type chartInfo struct {
 	Schema   bool   `json:"schema"`
 	// SuggestedName is a release name free in the namespace.
 	SuggestedName string `json:"suggestedName"`
+	// Settings are what the chart's values let the portal fill in, and
+	// Cluster what it fills them with — the latter only with a namespace.
+	Settings helmcat.Settings   `json:"settings"`
+	Cluster  *kube.ClusterHints `json:"cluster,omitempty"`
 }
 
 func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +274,8 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 		catalogError(w, err)
 		return
 	}
-	info := chartInfo{Located: loc, Digest: arc.Digest, Schema: len(arc.Chart.Schema) > 0}
+	info := chartInfo{Located: loc, Digest: arc.Digest, Schema: len(arc.Chart.Schema) > 0,
+		Settings: helmcat.Detect(arc.Chart.Values)}
 	for _, f := range arc.Chart.Raw {
 		if f.Name == "values.yaml" {
 			info.Defaults = string(f.Data)
@@ -275,6 +285,9 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 	// are not theirs to probe otherwise.
 	if ns != "" && s.mayAskFor(user.Roles, ns) {
 		info.SuggestedName = s.freeReleaseName(ns, loc.Name)
+		if len(info.Settings.Storage) > 0 || len(info.Settings.Ingresses) > 0 {
+			info.Cluster = s.catalog.hints(r.Context(), ns)
+		}
 	} else {
 		info.SuggestedName = loc.Name
 	}
@@ -314,6 +327,26 @@ func (s *Server) handleCatalogRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rel)
+}
+
+// handleFillValues writes what the install dialog filled from the cluster into
+// the values: a storage class, an ingress. Pure text in and out; nothing is
+// read or changed in the cluster.
+func (s *Server) handleFillValues(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Values string `json:"values"`
+		helmcat.Fill
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request does not read: " + err.Error()})
+		return
+	}
+	out, err := helmcat.ApplyFill(body.Values, body.Fill)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"values": out})
 }
 
 // catalogAsk is what a check or a request carries.

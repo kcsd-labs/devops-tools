@@ -3150,3 +3150,61 @@ a.seg-btn {
     animation-duration: 3s;
   }
 }
+.modal-overlay:has(> .modal.cat-install.expanded) {
+  padding: 12px;
+}
+.modal.cat-install.expanded {
+  width: 100%;
+  height: calc(100vh - 24px);
+  max-height: none;
+}
+.modal.cat-install.expanded .modal-body {
+  flex: 1;
+}
+.cat-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.cat-readme.tall {
+  height: calc(100vh - 360px);
+}
+.cat-fill {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.cat-fill-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.cat-fill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.cat-fill-row .input.sm {
+  width: auto;
+  min-width: 200px;
+}
+.cat-fill-note {
+  font-size: 12px;
+}
+.cat-fill-ingress {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 8px;
+  margin: 4px 0 8px 24px;
+}
+@media (max-width: 900px) {
+  .cat-split,
+  .cat-fill-ingress {
+    grid-template-columns: 1fr;
+  }
+}

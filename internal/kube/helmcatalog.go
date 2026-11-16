@@ -430,3 +430,68 @@ func uniqStrings(in []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ClusterHints are what the cluster says about where a chart will run: what
+// the install dialog offers instead of making people type it.
+type ClusterHints struct {
+	StorageClasses []StorageClassHint `json:"storageClasses"`
+	IngressClasses []string           `json:"ingressClasses"`
+	// IngressClass is the default class, or the one the neighbours use.
+	IngressClass string `json:"ingressClass"`
+	// Domain is the one most hosts in the namespace — or the cluster — use.
+	Domain string `json:"domain"`
+	// Certs are the namespace's TLS secrets that have not expired, with the
+	// names each covers, so a host can be matched to one.
+	Certs []CertHint `json:"certs"`
+}
+
+// StorageClassHint is one storage class of the cluster.
+type StorageClassHint struct {
+	Name    string `json:"name"`
+	Default bool   `json:"default,omitempty"`
+}
+
+// CertHint is a TLS secret and what it covers.
+type CertHint struct {
+	Name  string   `json:"name"`
+	Names []string `json:"names"`
+	Days  int      `json:"days"`
+}
+
+// GetClusterHints reads the hints for a namespace with the portal's account.
+// Anything it cannot read is left out rather than failing: these are offers.
+func (m *Manager) GetClusterHints(ctx context.Context, namespace string) *ClusterHints {
+	h := &ClusterHints{StorageClasses: []StorageClassHint{}, IngressClasses: []string{}, Certs: []CertHint{}}
+	cs, err := m.Clientset("")
+	if err != nil {
+		return h
+	}
+	if scs, err := cs.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, sc := range scs.Items {
+			def := sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" ||
+				sc.Annotations["storageclass.beta.kubernetes.io/is-default-class"] == "true"
+			h.StorageClasses = append(h.StorageClasses, StorageClassHint{Name: sc.Name, Default: def})
+		}
+		sort.Slice(h.StorageClasses, func(i, j int) bool {
+			if h.StorageClasses[i].Default != h.StorageClasses[j].Default {
+				return h.StorageClasses[i].Default
+			}
+			return h.StorageClasses[i].Name < h.StorageClasses[j].Name
+		})
+	}
+	w := buildWorld(ctx, cs, cs, namespace)
+	for c := range w.classes {
+		h.IngressClasses = append(h.IngressClasses, c)
+	}
+	sort.Strings(h.IngressClasses)
+	h.IngressClass = w.likelyClass(namespace)
+	h.Domain = w.likelyDomain(namespace)
+	for name, c := range w.certs {
+		if c == nil || !c.notAfter.After(w.now) {
+			continue
+		}
+		h.Certs = append(h.Certs, CertHint{Name: name, Names: c.names, Days: c.daysLeft(w.now)})
+	}
+	sort.Slice(h.Certs, func(i, j int) bool { return h.Certs[i].Days > h.Certs[j].Days })
+	return h
+}

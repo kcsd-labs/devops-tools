@@ -53,6 +53,35 @@ export interface CatalogChart extends CatalogPackage {
   defaults: string;
   schema: boolean;
   suggestedName: string;
+  /** What the chart's values let the portal fill in from the cluster. */
+  settings: CatalogSettings;
+  /** What the cluster offers; only when a namespace was given. */
+  cluster?: ClusterHints;
+}
+
+export interface IngressSpot {
+  path: string;
+  shape: "hostname" | "hosts" | "hostlist";
+  classKey: string;
+}
+
+export interface CatalogSettings {
+  storage: string[];
+  ingresses: IngressSpot[];
+}
+
+export interface ClusterHints {
+  storageClasses: { name: string; default?: boolean }[];
+  ingressClasses: string[];
+  ingressClass: string;
+  domain: string;
+  certs: { name: string; names: string[]; days: number }[];
+}
+
+export interface ValuesFill {
+  storageClass?: string;
+  storagePaths?: string[];
+  ingress?: IngressSpot & { host: string; class: string; tls: string };
 }
 
 export interface CatalogProblem {
@@ -942,6 +971,9 @@ export function createApi(token: string | undefined) {
       catalogCall<CatalogCheck>("POST", `/namespaces/${ns}/helm/check`, ask),
     catalogRequest: (ns: string, ask: CatalogAsk) =>
       catalogCall<HelmRequest>("POST", `/namespaces/${ns}/helm/requests`, ask),
+    /** Writes what was filled from the cluster into the values. */
+    fillValues: (values: string, fill: ValuesFill) =>
+      catalogCall<{ values: string }>("POST", "/helm/values/fill", { values, ...fill }),
     /** Requests in every namespace the caller works in. */
     myRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/my-requests"),
     withdrawRequest: (ns: string, id: string) =>
