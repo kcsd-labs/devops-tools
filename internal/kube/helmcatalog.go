@@ -230,10 +230,14 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		}
 		rel, err = m.dryRun(ctx, cfg, namespace, name, ch, vals, upgrade)
 	}
-	if err != nil && len(defined) > 0 {
+	if err != nil && len(defined) > 0 && unknownKinds(err) {
 		// The cluster cannot check objects of kinds the chart has not
-		// defined yet; render it without the cluster instead.
+		// defined yet; render it without the cluster instead. Only then: a
+		// chart that refuses its values refuses them offline too, and a
+		// large one takes seconds to say so twice.
+		began = time.Now()
 		rel, err = m.renderOffline(namespace, name, ch, vals)
+		plan.Timings = append(plan.Timings, Timing{"offline", time.Since(began)})
 	}
 	if err != nil {
 		plan.notRendered(err, ch)
@@ -248,6 +252,13 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 func staleKinds(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "no matches for kind") || strings.Contains(msg, "resource mapping not found")
+}
+
+// unknownKinds says whether a render failed because the cluster has no such
+// kind — one the chart's own resource definitions bring.
+func unknownKinds(err error) bool {
+	msg := err.Error()
+	return staleKinds(err) || strings.Contains(msg, "unable to recognize") || strings.Contains(msg, "could not find the requested resource")
 }
 
 // dryRun renders a release against the cluster without installing it.
