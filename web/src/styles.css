@@ -3302,11 +3302,13 @@ a.seg-btn {
   flex-direction: column;
   gap: 8px;
 }
+/* Simple: what the release gives on top, at most half the height and
+   scrolling on its own; the values below take the rest. */
 .cat-simple {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 14px;
 }
 .cat-simple-block {
@@ -3315,7 +3317,12 @@ a.seg-btn {
   min-height: 0;
 }
 .cat-simple-after {
-  max-height: 45%;
+  flex: 0 1 auto;
+  max-height: 50%;
+}
+.cat-simple-values {
+  flex: 1 1 0;
+  min-height: 180px;
 }
 .cat-simple-after .cat-notes {
   overflow: auto;
