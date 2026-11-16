@@ -3237,7 +3237,19 @@ a.seg-btn {
   margin-top: 0;
 }
 .cat-new-ns {
-  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.cat-new-ns .input {
+  width: 100%;
+}
+.cat-new-ns .field-hint {
+  margin: 0;
+  line-height: 1.45;
 }
 .cat-template {
   font-size: 12px;

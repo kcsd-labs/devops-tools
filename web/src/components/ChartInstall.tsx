@@ -393,6 +393,7 @@ export function ChartInstall(props: InstallProps) {
                 )}
                 {isNew && (
                   <div className="cat-new-ns">
+                    <label className="muted">Name of the new namespace</label>
                     <input
                       className="input mono"
                       value={newName}
