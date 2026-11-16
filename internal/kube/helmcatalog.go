@@ -102,6 +102,15 @@ type ReleasePlan struct {
 	Required []RequiredValue `json:"required,omitempty"`
 	// NewNamespace: the namespace does not exist yet; it would be created.
 	NewNamespace bool `json:"newNamespace,omitempty"`
+	// Refusal is what the chart said when it would not render, in its
+	// own words, one point each.
+	Refusal *Refusal `json:"refusal,omitempty"`
+}
+
+// Refusal is a chart's own reasons for not rendering, and where it said so.
+type Refusal struct {
+	Where    string   `json:"where,omitempty"`
+	Messages []string `json:"messages"`
 }
 
 // RequiredValue is a key a chart asked for, with what it said.
@@ -219,8 +228,8 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 // notRendered records why a chart did not render, and the values it named
 // as missing.
 func (p *ReleasePlan) notRendered(err error, ch *chart.Chart) {
-	msg := trimHelmError(err)
-	p.fail("the chart does not render with these values: %s", msg)
+	p.Refusal = parseRefusal(err.Error())
+	p.fail("the chart refused these values: %s", shorten(strings.Join(p.Refusal.Messages, " · "), 600))
 	p.Required = requiredValues(err.Error(), ch.Metadata.Name)
 }
 
@@ -558,6 +567,9 @@ type ClusterHints struct {
 	// Certs are the namespace's TLS secrets that have not expired, with the
 	// names each covers, so a host can be matched to one.
 	Certs []CertHint `json:"certs"`
+	// Secrets are the namespace's other Secrets, names and keys only, for a
+	// chart that takes the name of one holding a password.
+	Secrets []SecretHint `json:"secrets"`
 }
 
 // StorageClassHint is one storage class of the cluster.
@@ -576,7 +588,7 @@ type CertHint struct {
 // GetClusterHints reads the hints for a namespace with the portal's account.
 // Anything it cannot read is left out rather than failing: these are offers.
 func (m *Manager) GetClusterHints(ctx context.Context, namespace string) *ClusterHints {
-	h := &ClusterHints{StorageClasses: []StorageClassHint{}, IngressClasses: []string{}, Certs: []CertHint{}}
+	h := &ClusterHints{StorageClasses: []StorageClassHint{}, IngressClasses: []string{}, Certs: []CertHint{}, Secrets: []SecretHint{}}
 	cs, err := m.Clientset("")
 	if err != nil {
 		return h
@@ -608,5 +620,8 @@ func (m *Manager) GetClusterHints(ctx context.Context, namespace string) *Cluste
 		h.Certs = append(h.Certs, CertHint{Name: name, Names: c.names, Days: c.daysLeft(w.now)})
 	}
 	sort.Slice(h.Certs, func(i, j int) bool { return h.Certs[i].Days > h.Certs[j].Days })
+	if secrets, err := cs.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		h.Secrets = settingSecrets(secrets.Items)
+	}
 	return h
 }

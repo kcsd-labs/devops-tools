@@ -3539,3 +3539,27 @@ a.seg-btn {
   height: auto;
   max-height: 260px;
 }
+.cat-says {
+  margin: 4px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cat-says ul {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+.cat-says li {
+  margin-bottom: 4px;
+}
+.cat-says a {
+  word-break: break-all;
+}
+.cat-more {
+  margin: 4px 0 10px;
+  font-size: 12px;
+}
+.cat-more summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 8px;
+}

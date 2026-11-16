@@ -59,6 +59,8 @@ export interface CatalogChart extends CatalogPackage {
   cluster?: ClusterHints;
   /** What the chart says about each of its keys, a.b.c → words ("" when nothing). */
   docs: Record<string, string>;
+  /** Settings the chart shows only commented out, with the value each shows. */
+  examples: Record<string, string>;
   /** The starting values administrators keep for this chart. */
   template?: HelmTemplate;
   /** Why a new namespace by the asked name will not do. */
@@ -99,6 +101,8 @@ export interface ClusterHints {
   ingressClass: string;
   domain: string;
   certs: { name: string; names: string[]; days: number }[];
+  /** The namespace's Secrets: names and key names, never values. */
+  secrets?: { name: string; keys: string[] }[];
 }
 
 export interface ValuesFill {
@@ -112,6 +116,8 @@ export interface ValuesFill {
   replicas?: Record<string, number>;
   /** Values typed for keys the chart asked for. */
   set?: Record<string, string>;
+  /** Values typed for settings it takes without asking. */
+  extra?: Record<string, string>;
 }
 
 export interface CatalogProblem {
@@ -134,6 +140,8 @@ export interface CatalogCheck {
   required?: { key: string; said: string }[];
   /** The namespace does not exist yet. */
   newNamespace?: boolean;
+  /** What the chart said when it would not render, one point each. */
+  refusal?: { where?: string; messages: string[] };
 }
 
 export interface CatalogAsk {

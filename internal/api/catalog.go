@@ -315,6 +315,9 @@ type chartInfo struct {
 	Cluster  *kube.ClusterHints `json:"cluster,omitempty"`
 	// Docs are what the chart says about each of its keys.
 	Docs map[string]string `json:"docs"`
+	// Examples are settings the chart shows only commented out, with the
+	// value each shows: optional ones, offered beside the ones it asks for.
+	Examples map[string]string `json:"examples"`
 	// Template is what administrators keep as the chart's starting values.
 	Template *helmreq.Template `json:"template,omitempty"`
 	// NamespaceProblem says why a new namespace by that name will not do.
@@ -330,11 +333,12 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := chartInfo{Located: loc, Digest: arc.Digest, Schema: len(arc.Chart.Schema) > 0,
-		Settings: helmcat.Detect(arc.Chart.Values), Docs: map[string]string{}}
+		Settings: helmcat.Detect(arc.Chart.Values), Docs: map[string]string{}, Examples: map[string]string{}}
 	for _, f := range arc.Chart.Raw {
 		if f.Name == "values.yaml" {
 			info.Defaults = string(f.Data)
 			info.Docs = helmcat.Docs(f.Data)
+			info.Examples = helmcat.Examples(f.Data)
 		}
 	}
 	if t, err := s.catalog.templates.Get(r.Context(), loc.Repo, loc.Name); err == nil {

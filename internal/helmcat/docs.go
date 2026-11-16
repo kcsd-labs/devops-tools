@@ -61,6 +61,63 @@ func Docs(raw []byte) map[string]string {
 	return out
 }
 
+var (
+	realKeyRE      = regexp.MustCompile(`^(\s*)([A-Za-z0-9_.-]+):(\s|$)`)
+	commentedKeyRE = regexp.MustCompile(`^(\s*)#\s?([a-z][A-Za-z0-9_-]*):(?:\s+([^#]*?))?\s*(#.*)?$`)
+)
+
+// Examples are the settings a chart's values.yaml shows only commented out —
+// "# username: gitlab" under psql — each with the value it shows. They are
+// the optional ones: a chart that needs a host and a password says so, but
+// not that it also takes a user name and a database.
+func Examples(raw []byte) map[string]string {
+	out := map[string]string{}
+	type level struct {
+		indent int
+		key    string
+	}
+	var stack []level
+	path := func(upto int) []string {
+		var p []string
+		for _, l := range stack[:upto] {
+			p = append(p, l.key)
+		}
+		return p
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(string(raw), "\r", ""), "\n") {
+		if m := realKeyRE.FindStringSubmatch(line); m != nil {
+			indent := len(m[1])
+			for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
+				stack = stack[:len(stack)-1]
+			}
+			stack = append(stack, level{indent, m[2]})
+			continue
+		}
+		m := commentedKeyRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		indent := len(m[1])
+		// Under the deepest real key less indented than the comment.
+		n := len(stack)
+		for n > 0 && stack[n-1].indent >= indent {
+			n--
+		}
+		if n == 0 && indent > 0 {
+			continue
+		}
+		value := strings.TrimSpace(m[3])
+		if len(strings.Fields(value)) > 3 {
+			continue // words, not a value
+		}
+		p := strings.Join(append(path(n), m[2]), ".")
+		if _, ok := out[p]; !ok && len(out) < maxDocs {
+			out[p] = value
+		}
+	}
+	return out
+}
+
 // commentText is a comment block as prose: the # marks and helm-docs' "--"
 // taken off, Bitnami's section markers and commented-out examples dropped.
 func commentText(c string) string {

@@ -42,6 +42,58 @@ func TestDocs(t *testing.T) {
 	}
 }
 
+const commented = `
+global:
+  psql:
+    knownDecompositions:
+      - main
+    password: {}
+      # useSecret:
+      # secret:
+      # key:
+    # host: postgresql.hostedsomewhere.else
+    # port: 123
+    # username: gitlab
+    # Note: this is about something else entirely
+  redis:
+    auth:
+      enabled: true
+      # secret:
+    # host: redis.hostedsomewhere.else
+`
+
+func TestExamples(t *testing.T) {
+	e := Examples([]byte(commented))
+	want := map[string]string{
+		"global.psql.password.useSecret": "",
+		"global.psql.password.secret":    "",
+		"global.psql.password.key":       "",
+		"global.psql.host":               "postgresql.hostedsomewhere.else",
+		"global.psql.port":               "123",
+		"global.psql.username":           "gitlab",
+		"global.redis.auth.secret":       "",
+		"global.redis.host":              "redis.hostedsomewhere.else",
+	}
+	for k, v := range want {
+		if got, ok := e[k]; !ok || got != v {
+			t.Errorf("%s = %q (%v), want %q", k, got, ok, v)
+		}
+	}
+	if len(e) != len(want) {
+		t.Errorf("examples = %v", e)
+	}
+
+	out, _, err := ApplyFill("", Fill{Set: map[string]string{"global.psql.host": "db"},
+		Extra: map[string]string{"global.psql.username": "app", "global.psql.host": "ignored"}}, Fill{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	psql := values(t, out)["global"].(map[string]any)["psql"].(map[string]any)
+	if psql["host"] != "db" || psql["username"] != "app" || !strings.Contains(out, "# from the install form") {
+		t.Errorf("extra:\n%s", out)
+	}
+}
+
 func TestDetectMore(t *testing.T) {
 	s := Detect(values(t, `
 global:

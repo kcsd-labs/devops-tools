@@ -243,6 +243,9 @@ type Fill struct {
 	// Set are values typed for keys the chart asked for, each written as
 	// a YAML scalar would read: 3 is a number, true a yes, the rest text.
 	Set map[string]string `json:"set"`
+	// Extra are values typed for settings the chart takes but does not ask
+	// for — a user name beside a host it does ask for.
+	Extra map[string]string `json:"extra"`
 }
 
 // IngressFill is an ingress to switch on in one block.
@@ -275,6 +278,7 @@ const (
 	noteDisk     = "disk size, from the install form"
 	noteReplicas = "replicas, from the install form"
 	noteRequired = "the chart asks for this"
+	noteExtra    = "from the install form"
 )
 
 // assignments are the keys a fill sets, each with its value.
@@ -313,6 +317,15 @@ func (f Fill) assignments() (map[string]assign, error) {
 			continue
 		}
 		out[p] = assign{scalar(raw), noteRequired}
+	}
+	for p, raw := range f.Extra {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if _, asked := out[p]; !asked {
+			out[p] = assign{scalar(raw), noteExtra}
+		}
 	}
 	for p := range out {
 		if !pathRE.MatchString(p) {

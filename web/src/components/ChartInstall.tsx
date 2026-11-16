@@ -454,6 +454,7 @@ export function ChartInstall(props: InstallProps) {
                 onFilled={filled}
                 asked={asked}
                 stillAsked={stillAsked}
+                refusal={check && !check.ok ? check.refusal : undefined}
               />
 
               {direct && kind === "install" && (
@@ -661,6 +662,7 @@ function InstallForm({
   onFilled,
   asked,
   stillAsked,
+  refusal,
 }: {
   info: CatalogChart;
   hints?: ClusterHints;
@@ -672,6 +674,7 @@ function InstallForm({
   onFilled: (v: string) => void;
   asked: { key: string; said: string }[];
   stillAsked: Set<string>;
+  refusal?: { where?: string; messages: string[] };
 }) {
   const api = useApi();
   const settings = info.settings;
@@ -679,6 +682,7 @@ function InstallForm({
   const install = kind === "install";
   const defaultClass = hints?.storageClasses.find((c) => c.default)?.name ?? "";
   const [typed, setTyped] = useState<Record<string, string>>({});
+  const [extra, setExtra] = useState<Record<string, string>>({});
   const [storage, setStorage] = useState("");
   const [disk, setDisk] = useState("");
   const [preset, setPreset] = useState("");
@@ -715,6 +719,8 @@ function InstallForm({
   }
   const set: Record<string, string> = {};
   for (const [k, v] of Object.entries(typed)) if (v.trim()) set[k] = v;
+  const more: Record<string, string> = {};
+  for (const [k, v] of Object.entries(extra)) if (v.trim() && !set[k]) more[k] = v;
   const diskOK = /^[0-9]+(\.[0-9]+)?(Mi|Gi|Ti)$/.test(disk);
   const fill: ValuesFill = install
     ? {
@@ -726,9 +732,10 @@ function InstallForm({
         presetPaths: settings.presets,
         replicas: replicaCounts,
         set,
+        extra: more,
         ingress: expose && sp && host ? { ...sp, host, class: ingressClass, tls: cert } : undefined,
       }
-    : { set };
+    : { set, extra: more };
   const fillKey = JSON.stringify(fill);
 
   // What was last written, so the next change can take it out again.
@@ -790,28 +797,19 @@ function InstallForm({
 
   return (
     <div className="cat-form">
-      {asked.length > 0 && (
-        <div className={"cat-asked" + (asked.some((a) => stillAsked.has(a.key) && !typed[a.key]?.trim()) ? " open" : "")}>
-          <div className="cat-q">The chart needs this to install</div>
-          {asked.map((a) => (
-            <div className="field" key={a.key}>
-              <label className="mono cat-asked-key">{a.key}</label>
-              {docs[a.key] ? (
-                <div className="cat-why">{docs[a.key]}</div>
-              ) : (
-                a.said && <div className="cat-why">{a.said}</div>
-              )}
-              <input
-                className="input"
-                value={typed[a.key] ?? ""}
-                placeholder={stillAsked.has(a.key) ? "required" : ""}
-                onChange={(e) => setTyped((t) => ({ ...t, [a.key]: e.target.value }))}
-              />
-              {handEdited(keptOf([a.key]))}
-            </div>
-          ))}
-        </div>
-      )}
+      <ChartNeeds
+        asked={asked}
+        stillAsked={stillAsked}
+        refusal={refusal}
+        typed={typed}
+        setTyped={setTyped}
+        extra={extra}
+        setExtra={setExtra}
+        docs={docs}
+        examples={info.examples ?? {}}
+        secrets={hints?.secrets}
+        kept={kept}
+      />
 
       {hasQuestions && <div className="cat-side-title">Questions</div>}
 
@@ -976,6 +974,182 @@ function InstallForm({
         </div>
       )}
       {error && <div className="cat-failed cat-settings-error">{error}</div>}
+    </div>
+  );
+}
+
+const secretKeyRE = /(^|\.)(secret|secretName|existingSecret)$/;
+const urlRE = /(https?:\/\/[^\s)`'"]+)/g;
+
+/** A sentence with its addresses as links. */
+function Linked({ text }: { text: string }) {
+  const parts = text.split(urlRE);
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <a key={i} href={p.replace(/[.,;]+$/, "")} target="_blank" rel="noopener noreferrer">
+            {p}
+          </a>
+        ) : (
+          <span key={i}>{p}</span>
+        )
+      )}
+    </>
+  );
+}
+
+const parentOf = (k: string) => (k.includes(".") ? k.slice(0, k.lastIndexOf(".")) : "");
+const lastOf = (k: string) => k.slice(k.lastIndexOf(".") + 1);
+
+/** What the chart needs before it installs: its own words when it refused,
+    a field for each key it named, the key inside a Secret it takes by name,
+    settings named in its words, and — folded — the optional settings beside
+    the ones it asked for, as its values.yaml shows them commented out. */
+function ChartNeeds({
+  asked,
+  stillAsked,
+  refusal,
+  typed,
+  setTyped,
+  extra,
+  setExtra,
+  docs,
+  examples,
+  secrets,
+  kept,
+}: {
+  asked: { key: string; said: string }[];
+  stillAsked: Set<string>;
+  refusal?: { where?: string; messages: string[] };
+  typed: Record<string, string>;
+  setTyped: (f: (t: Record<string, string>) => Record<string, string>) => void;
+  extra: Record<string, string>;
+  setExtra: (f: (t: Record<string, string>) => Record<string, string>) => void;
+  docs: Record<string, string>;
+  examples: Record<string, string>;
+  secrets?: { name: string; keys: string[] }[];
+  kept: string[];
+}) {
+  const known = (k: string) => k in examples || k in docs;
+  const shown = new Set(asked.map((a) => a.key));
+
+  // The key inside each Secret the chart takes by name.
+  const keyFields: string[] = [];
+  for (const a of asked) {
+    if (!secretKeyRE.test(a.key)) continue;
+    const k = parentOf(a.key) + ".key";
+    if (known(k) && !shown.has(k)) {
+      keyFields.push(k);
+      shown.add(k);
+    }
+  }
+  // Settings named in the chart's words: `connection` → …connection.secret.
+  const named: string[] = [];
+  for (const m of refusal?.messages ?? []) {
+    for (const [, word] of m.matchAll(/`([A-Za-z][\w-]*)`/g)) {
+      for (const k of Object.keys(examples)) {
+        if (named.length >= 6) break;
+        if (k.split(".").includes(word) && !shown.has(k)) {
+          named.push(k);
+          shown.add(k);
+        }
+      }
+    }
+  }
+  // Beside what was asked: the rest of the block, as the chart shows it.
+  const groups: string[] = [];
+  for (const a of asked) {
+    let g = parentOf(a.key);
+    if (secretKeyRE.test(a.key) || /^(password|auth|credentials)$/.test(lastOf(g))) g = parentOf(g);
+    if (g && !groups.includes(g)) groups.push(g);
+  }
+  const optional = (g: string) =>
+    Object.keys(examples).filter(
+      (k) => parentOf(k) === g && !shown.has(k) && !Object.keys(examples).some((x) => x.startsWith(k + "."))
+    );
+
+  const value = (k: string) => typed[k] ?? extra[k] ?? "";
+  const field = (k: string, required: boolean) => {
+    const secretish = secretKeyRE.test(k);
+    const inSecret = !secretish && lastOf(k) === "key" ? secrets?.find((s) => s.name === value(parentOf(k) + ".secret")) : undefined;
+    const list = secretish ? (secrets ?? []).map((s) => s.name) : (inSecret?.keys ?? []);
+    const said = docs[k] || (required ? asked.find((a) => a.key === k)?.said : "");
+    const set = required ? setTyped : setExtra;
+    return (
+      <div className="field" key={k}>
+        <label className="mono cat-asked-key">
+          {k}
+          {!required && <span className="cat-dim"> · optional</span>}
+        </label>
+        {said && <div className="cat-why">{said}</div>}
+        {secretish && (
+          <div className="cat-why">
+            The name of a Secret in this namespace that holds it — not the value itself.
+            {secrets && secrets.length === 0 && " There are none here yet: create one under Secrets & ConfigMaps."}
+          </div>
+        )}
+        {lastOf(k) === "key" && !secretish && k.endsWith(".key") && (
+          <div className="cat-why">The key inside that Secret.</div>
+        )}
+        <input
+          className="input"
+          list={list.length ? "dl-" + k : undefined}
+          value={value(k)}
+          placeholder={required && stillAsked.has(k) ? "required" : examples[k] ? `e.g. ${examples[k]}` : ""}
+          onChange={(e) => set((t) => ({ ...t, [k]: e.target.value }))}
+        />
+        {list.length > 0 && (
+          <datalist id={"dl-" + k}>
+            {list.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+        )}
+        {kept.includes(k) && (
+          <div className="field-hint cat-kept">✎ changed in the values by hand — left as you wrote it</div>
+        )}
+      </div>
+    );
+  };
+
+  if (asked.length === 0 && !refusal) return null;
+  const open = !!refusal || asked.some((a) => stillAsked.has(a.key) && !typed[a.key]?.trim());
+  return (
+    <div className={"cat-asked" + (open ? " open" : "")}>
+      <div className="cat-q">The chart needs this to install</div>
+      {refusal && refusal.messages.length > 0 && (
+        <div className="cat-says">
+          <div className="cat-why">The chart says:</div>
+          <ul>
+            {refusal.messages.map((m, i) => (
+              <li key={i}>
+                <Linked text={m} />
+              </li>
+            ))}
+          </ul>
+          {refusal.where && <div className="cat-dim mono">at {refusal.where}</div>}
+        </div>
+      )}
+      {asked.map((a) => [field(a.key, true), ...keyFields.filter((k) => parentOf(k) === parentOf(a.key)).map((k) => field(k, false))])}
+      {named.length > 0 && (
+        <>
+          <div className="cat-why">Settings of this chart the message names:</div>
+          {named.map((k) => field(k, false))}
+        </>
+      )}
+      {groups.map((g) => {
+        const keys = optional(g);
+        if (keys.length === 0) return null;
+        return (
+          <details className="cat-more" key={g}>
+            <summary>
+              More for <span className="mono">{g}</span>: {keys.map(lastOf).join(", ")}
+            </summary>
+            {keys.map((k) => field(k, false))}
+          </details>
+        );
+      })}
     </div>
   );
 }
