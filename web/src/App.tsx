@@ -27,6 +27,7 @@ const LOCAL_SIGNIN_PATH = "/signin/local";
 // Brings the same editor, and is loaded on demand for the same reason.
 const ConfigMaps = lazy(() => import("./pages/ConfigMaps").then((m) => ({ default: m.ConfigMaps })));
 const Ingresses = lazy(() => import("./pages/Ingresses").then((m) => ({ default: m.Ingresses })));
+const HelmPackages = lazy(() => import("./pages/HelmPackages").then((m) => ({ default: m.HelmPackages })));
 const HelmRequests = lazy(() => import("./pages/HelmRequests").then((m) => ({ default: m.HelmRequests })));
 
 const Configurations = lazy(() =>
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="/access/roles" element={<Roles />} />
         <Route path="/access/storage" element={<Storage />} />
         <Route path="/audit" element={<Audit />} />
+        <Route path="/helm-packages" element={<HelmPackages />} />
         <Route path="/helm-requests" element={<HelmRequests />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -111,6 +111,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			// The storage screen: visible with the users list, but the buttons
 			// on it need the stronger grant — see the handlers.
 			"accessRestore": s.authz.AllowedGlobal(user.Roles, OpAccessRestore),
+			// The Helm Packages page, for someone who may ask for an install or
+			// an upgrade somewhere.
+			"helmPackages": s.catalog != nil && (len(s.authz.NamespacesForOp(user.Roles, OpHelmInstall)) > 0 ||
+				len(s.authz.NamespacesForOp(user.Roles, OpHelmUpgrade)) > 0),
 			// Requests to install from the catalog, for those who answer them.
 			"helmRequests": s.catalog != nil && s.authz.AllowedGlobal(user.Roles, OpUserManage),
 		},

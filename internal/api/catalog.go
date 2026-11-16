@@ -44,10 +44,12 @@ type catalog struct {
 	// fetch reads one version of a chart: where it is and the archive.
 	fetch func(ctx context.Context, repo, name, version string) (*helmcat.Located, *helmcat.Archive, error)
 	// current reads a release installed from the catalog; trouble says why
-	// its pods are not up; releases lists a namespace's release names.
-	current  func(ns, name string) (*kube.CatalogRelease, error)
-	trouble  func(ctx context.Context, ns, name string) string
-	releases func(ns string) ([]string, error)
+	// its pods are not up; releases lists a namespace's releases, read with
+	// the portal's account; namespaces lists the cluster's.
+	current    func(ns, name string) (*kube.CatalogRelease, error)
+	trouble    func(ctx context.Context, ns, name string) string
+	releases   func(ns string) ([]kube.HelmRelease, error)
+	namespaces func(ctx context.Context) ([]string, error)
 }
 
 // WithCatalog switches the catalog on.
@@ -57,13 +59,9 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 	c.installer = s.runInstall
 	c.current = s.kube.GetCatalogRelease
 	c.trouble = s.kube.ReleaseTrouble
-	c.releases = func(ns string) ([]string, error) {
-		rels, err := s.kube.ListReleases("", ns)
-		names := make([]string, 0, len(rels))
-		for _, r := range rels {
-			names = append(names, r.Name)
-		}
-		return names, err
+	c.releases = func(ns string) ([]kube.HelmRelease, error) { return s.kube.ListReleases("", ns) }
+	c.namespaces = func(ctx context.Context) ([]string, error) {
+		return s.kube.ListNamespaces(ctx, "", s.cfg.Cluster.HiddenNamespaces)
 	}
 	c.fetch = func(ctx context.Context, repo, name, version string) (*helmcat.Located, *helmcat.Archive, error) {
 		loc, err := hub.Locate(ctx, repo, name, version)
@@ -84,14 +82,19 @@ func (s *Server) catalogRoutes(r chi.Router, base string) {
 	if s.catalog == nil {
 		return
 	}
-	r.Get(base+"/helm/catalog-access", s.requireOp(OpHelmList, s.handleCatalogAccess))
+	// The Helm Packages page: open to whoever may ask for an install or an
+	// upgrade, whether or not they hold helm-list.
+	packages := []string{OpHelmInstall, OpHelmUpgrade, OpHelmList}
+	r.Get("/helm/namespaces", s.handleCatalogNamespaces)
+	r.Get(base+"/helm/catalog-access", s.requireAnyOp(packages, s.handleCatalogAccess))
+	r.Get(base+"/helm/catalog-releases", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade}, s.handleCatalogReleases))
 	r.Get(base+"/helm/catalog", s.requireOp(OpHelmInstall, s.handleCatalogSearch))
 	r.Get(base+"/helm/catalog/{repo}/{chart}", s.requireAnyOp([]string{OpHelmInstall, OpHelmUpgrade}, s.handleCatalogChart))
 	r.Get(base+"/helm/releases/{name}/catalog", s.requireOp(OpHelmUpgrade, s.handleCatalogRelease))
 	r.Post(base+"/helm/check", s.handleCatalogCheck)
-	r.Get(base+"/helm/requests", s.requireOp(OpHelmList, s.handleNamespaceRequests))
+	r.Get(base+"/helm/requests", s.requireAnyOp(packages, s.handleNamespaceRequests))
 	r.Post(base+"/helm/requests", s.handleCreateRequest)
-	r.Delete(base+"/helm/requests/{id}", s.requireOp(OpHelmList, s.handleWithdrawRequest))
+	r.Delete(base+"/helm/requests/{id}", s.requireAnyOp(packages, s.handleWithdrawRequest))
 
 	r.Get("/helm/requests", s.requireGlobalOp(OpUserManage, s.handleAllRequests))
 	r.Get("/helm/requests/count", s.requireGlobalOp(OpUserManage, s.handleRequestCount))
@@ -129,9 +132,62 @@ func (s *Server) handleCatalogAccess(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"install": s.authz.Allowed(user.Roles, ns, OpHelmInstall),
 		"upgrade": s.authz.Allowed(user.Roles, ns, OpHelmUpgrade),
+		// Whether the Helm releases page, with the history, is open to them.
+		"list": s.authz.Allowed(user.Roles, ns, OpHelmList),
 		// An administrator's install needs no request.
 		"direct": s.isApprover(user.Roles),
 	})
+}
+
+// mayAskFor reports whether these roles may ask for an install or an upgrade
+// in ns — what puts a namespace on the Helm Packages page.
+func (s *Server) mayAskFor(roles []string, ns string) bool {
+	return s.authz.Allowed(roles, ns, OpHelmInstall) || s.authz.Allowed(roles, ns, OpHelmUpgrade)
+}
+
+// handleCatalogNamespaces lists the namespaces the Helm Packages page offers:
+// those the caller may install or upgrade in. Never the closed ones, whatever
+// a role says.
+func (s *Server) handleCatalogNamespaces(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.FromContext(r.Context())
+	candidates := unionSorted(
+		s.authz.NamespacesForOp(user.Roles, OpHelmInstall),
+		s.authz.NamespacesForOp(user.Roles, OpHelmUpgrade))
+	for _, ns := range candidates {
+		if ns == "*" {
+			all, err := s.catalog.namespaces(r.Context())
+			if err != nil {
+				http.Error(w, "could not list the namespaces: "+err.Error(), http.StatusBadGateway)
+				return
+			}
+			candidates = unionSorted(all, candidates)
+			break
+		}
+	}
+	out := []string{}
+	for _, ns := range candidates {
+		if ns != "*" && s.mayAskFor(user.Roles, ns) {
+			out = append(out, ns)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"namespaces": out})
+}
+
+// handleCatalogReleases lists the releases in a namespace that came from the
+// catalog — the ones this page upgrades.
+func (s *Server) handleCatalogReleases(w http.ResponseWriter, r *http.Request) {
+	rels, err := s.catalog.releases(chi.URLParam(r, "namespace"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := []kube.HelmRelease{}
+	for _, rel := range rels {
+		if rel.Catalog != nil {
+			out = append(out, rel)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleCatalogSearch(w http.ResponseWriter, r *http.Request) {
@@ -173,13 +229,13 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 
 // freeReleaseName is name, or name-2, name-3… — the first not taken in ns.
 func (s *Server) freeReleaseName(ns, name string) string {
-	names, err := s.catalog.releases(ns)
+	rels, err := s.catalog.releases(ns)
 	if err != nil {
 		return name
 	}
 	taken := map[string]bool{}
-	for _, n := range names {
-		taken[n] = true
+	for _, r := range rels {
+		taken[r.Name] = true
 	}
 	for i := 1; ; i++ {
 		n := name

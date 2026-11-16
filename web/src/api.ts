@@ -131,6 +131,8 @@ export interface Capabilities {
   ingresses?: boolean;
   /** May take a snapshot of the access model, and put one back. */
   accessRestore: boolean;
+  /** May ask for an install or an upgrade somewhere: the Helm Packages page. */
+  helmPackages?: boolean;
   /** Answers requests to install from the catalog. */
   helmRequests?: boolean;
 }
@@ -908,8 +910,14 @@ export function createApi(token: string | undefined) {
         `/namespaces/${ns}/helm/releases/${name}`
       ),
 
+    catalogNamespaces: () => catalogCall<{ namespaces: string[] }>("GET", "/helm/namespaces"),
     catalogAccess: (ns: string) =>
-      catalogCall<{ install: boolean; upgrade: boolean; direct: boolean }>("GET", `/namespaces/${ns}/helm/catalog-access`),
+      catalogCall<{ install: boolean; upgrade: boolean; direct: boolean; list: boolean }>(
+        "GET",
+        `/namespaces/${ns}/helm/catalog-access`
+      ),
+    /** The releases in a namespace that came from the catalog. */
+    catalogReleases: (ns: string) => catalogCall<HelmRelease[]>("GET", `/namespaces/${ns}/helm/catalog-releases`),
     catalogSearch: (ns: string, q: string, offset = 0) =>
       catalogCall<{ packages: CatalogPackage[]; total: number }>(
         "GET",

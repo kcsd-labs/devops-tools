@@ -17,6 +17,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [canSeeIngresses, setCanSeeIngresses] = useState(false);
   const [canSeeAudit, setCanSeeAudit] = useState(false);
   const [answersRequests, setAnswersRequests] = useState(false);
+  const [canSeePackages, setCanSeePackages] = useState(false);
   const [waiting, setWaiting] = useState(0);
   const [version, setVersion] = useState("");
   const [theme, setTheme] = useState<"dark" | "light">(
@@ -50,6 +51,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         setCanSeeIngresses(m.capabilities?.ingresses ?? false);
         setCanSeeAudit(m.capabilities?.audit ?? false);
         setAnswersRequests(m.capabilities?.helmRequests ?? false);
+        setCanSeePackages(m.capabilities?.helmPackages ?? false);
         setVersion(m.version ?? "");
       })
       .catch(() => {});
@@ -122,6 +124,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
               }
             >
               <span>Services</span>
+              <span className="chev">›</span>
+            </NavLink>
+          )}
+          {/* Installing charts from the catalog, beside the other things a team
+              runs in its namespaces. */}
+          {canSeePackages && (
+            <NavLink
+              to="/helm-packages"
+              className={() =>
+                "nav-item" + (location.pathname.startsWith("/helm-packages") ? " active" : "")
+              }
+            >
+              <span>Helm Packages</span>
               <span className="chev">›</span>
             </NavLink>
           )}

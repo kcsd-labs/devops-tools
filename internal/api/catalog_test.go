@@ -78,9 +78,14 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 			f.installed <- vals
 			return nil
 		},
-		current:  func(string, string) (*kube.CatalogRelease, error) { return nil, kube.ErrNotFromCatalog },
-		trouble:  func(context.Context, string, string) string { return "" },
-		releases: func(string) ([]string, error) { return []string{"redis"}, nil },
+		current: func(string, string) (*kube.CatalogRelease, error) { return nil, kube.ErrNotFromCatalog },
+		trouble: func(context.Context, string, string) string { return "" },
+		releases: func(string) ([]kube.HelmRelease, error) {
+			return []kube.HelmRelease{{Name: "redis", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "redis"}}, {Name: "payments-api"}}, nil
+		},
+		namespaces: func(context.Context) ([]string, error) {
+			return []string{"devops-tools", "payments-dev", "accounts-dev"}, nil
+		},
 	}
 
 	r := chi.NewRouter()
@@ -257,5 +262,25 @@ func TestValueKeysNamesOnly(t *testing.T) {
 	q := &helmreq.Request{Chart: "redis", Version: "1", Repo: "bitnami"}
 	if d := requestDetail(q, vals); strings.Contains(d, "s3cret") {
 		t.Errorf("the audit line carries a value: %s", d)
+	}
+}
+
+func TestPackagesNamespacesAndReleases(t *testing.T) {
+	f := newCatalogFixture(t)
+	_, out := f.call(t, "anna", "GET", "/api/helm/namespaces", nil)
+	if got, _ := json.Marshal(out["namespaces"]); string(got) != `["payments-dev"]` {
+		t.Errorf("a developer's namespaces = %s", got)
+	}
+	// "*" is every namespace but the closed ones.
+	_, out = f.call(t, "root", "GET", "/api/helm/namespaces", nil)
+	if got, _ := json.Marshal(out["namespaces"]); string(got) != `["accounts-dev","payments-dev"]` {
+		t.Errorf("an administrator's namespaces = %s", got)
+	}
+	code, list := f.callList(t, "anna", "/api/namespaces/payments-dev/helm/catalog-releases")
+	if code != http.StatusOK || len(list) != 1 || list[0]["name"] != "redis" {
+		t.Errorf("catalog releases: %d %v", code, list)
+	}
+	if code, _ := f.call(t, "anna", "GET", "/api/namespaces/accounts-dev/helm/catalog-releases", nil); code != http.StatusForbidden {
+		t.Errorf("another team's namespace: %d", code)
 	}
 }
