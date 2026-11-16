@@ -34,7 +34,7 @@ export function ChartDetails({
   const p = info ?? pkg;
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal cat-install" onClick={(e) => e.stopPropagation()}>
+      <div className="modal cat-details" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div className="cat-head">
             <div className="cat-logo-box big">{p.logo ? <img src={p.logo} alt="" /> : <span>⎈</span>}</div>

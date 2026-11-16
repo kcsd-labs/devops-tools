@@ -3016,6 +3016,39 @@ a.seg-btn {
   border-radius: 9px;
   padding: 4px 16px 12px;
 }
+/* A chart's description: the README takes the height there is, the buttons
+   stay at the bottom. */
+.modal.cat-details {
+  width: min(1200px, 96vw);
+  height: min(92vh, 1000px);
+  max-height: none;
+}
+.modal.cat-details .modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.modal.cat-details .cat-readme-md {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+.modal.cat-details .modal-actions {
+  margin-top: 0;
+  padding: 12px 20px;
+  align-items: center;
+}
+@media (max-width: 900px) {
+  .modal.cat-details {
+    width: 100%;
+    height: auto;
+    max-height: 94vh;
+  }
+  .modal.cat-details .cat-readme-md {
+    max-height: 55vh;
+  }
+}
 .cat-readme.cat-readme-md {
   white-space: normal;
   max-height: none;
