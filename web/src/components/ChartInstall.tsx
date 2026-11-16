@@ -4,7 +4,7 @@ import { yaml } from "@codemirror/lang-yaml";
 import { useApi } from "../useApi";
 import { useEditorTheme } from "../editorTheme";
 import { CatalogError, type CatalogAsk, type CatalogChart, type CatalogCheck, type HelmRequest } from "../api";
-import { CheckResult } from "./Catalog";
+import { CheckResult, Loading } from "./Catalog";
 import { Markdown } from "./Markdown";
 
 // The namespace this browser last installed into, offered first next time.
@@ -165,7 +165,7 @@ export function ChartInstall(props: InstallProps) {
         </div>
         <div className="modal-body pad">
           {loadError && <div className="alert">{loadError}</div>}
-          {!info && !loadError && <div className="muted">Fetching the chart…</div>}
+          {!info && !loadError && <Loading text="Fetching the chart…" bar slow="The chart is downloaded from where its author publishes it — a large one can take up to a minute." />}
           {namespaces?.length === 0 && (
             <div className="alert">There is no namespace you may install into. Ask for helm-install on one.</div>
           )}

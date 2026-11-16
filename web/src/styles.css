@@ -3097,3 +3097,56 @@ a.seg-btn {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.cat-loading {
+  padding: 18px 16px;
+  color: var(--muted);
+}
+.cat-loading-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.cat-spin {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: chip-spin 0.8s linear infinite;
+  flex: none;
+}
+.ing-check .cat-spin {
+  width: 12px;
+  height: 12px;
+}
+.cat-progress {
+  position: relative;
+  height: 3px;
+  margin-top: 12px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.cat-progress > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  border-radius: 3px;
+  background: var(--accent);
+  animation: cat-progress 1.3s ease-in-out infinite;
+}
+@keyframes cat-progress {
+  from { left: -35%; }
+  to { left: 100%; }
+}
+.cat-loading-slow {
+  margin-top: 10px;
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat-spin,
+  .cat-progress > span {
+    animation-duration: 3s;
+  }
+}

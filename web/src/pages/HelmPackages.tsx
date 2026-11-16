@@ -4,7 +4,7 @@ import { useApi } from "../useApi";
 import type { CatalogPackage, HelmRelease, HelmRequest } from "../api";
 import { useDialogs } from "../components/Dialogs";
 import { pushToast } from "../toasts";
-import { RequestStatus, requestLine, requestNote } from "../components/Catalog";
+import { Loading, RequestStatus, requestLine, requestNote } from "../components/Catalog";
 
 // Helm Packages: installing charts from the catalog, upgrading what was
 // installed from it, and following the requests that ask for either. Not tied
@@ -276,7 +276,7 @@ function CatalogList({
         ))}
         {!loading && !error && items.length === 0 && <div className="muted center pad">Nothing matches</div>}
       </div>
-      {loading && <div className="muted center pad">Searching…</div>}
+      {loading && <Loading text="Searching Artifact Hub…" />}
       {!loading && items.length < total && (
         <div className="center pad">
           <button className="btn ghost" onClick={more}>
@@ -311,7 +311,7 @@ function InstalledList({ onUpgrade }: { onUpgrade: (r: HelmRelease) => void }) {
           {error}
         </div>
       )}
-      {list === null && !error && <div className="muted center pad">Loading…</div>}
+      {list === null && !error && <Loading text="Looking through the releases…" />}
       {list?.length === 0 && <div className="muted center pad">Nothing was installed from the catalog yet</div>}
       <div className="cat-list">
         {list?.map((r) => (
@@ -403,7 +403,7 @@ function RequestList({
           {error}
         </div>
       )}
-      {list === null && !error && <div className="muted center pad">Loading…</div>}
+      {list === null && !error && <Loading text="Loading the requests…" />}
       {list?.length === 0 && <div className="muted center pad">No requests yet</div>}
       <div className="cat-list">
         {list?.map((q) => (

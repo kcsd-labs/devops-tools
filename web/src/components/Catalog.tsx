@@ -1,9 +1,35 @@
+import { useEffect, useState } from "react";
 import type { CatalogCheck, HelmRequest } from "../api";
 
 // Installing from the catalog: the line that says what a check found, and the
 // words a request is shown with. Shared by the Helm page, the install dialog
 // and the administrators' request screen. No editor here: this is loaded with
 // the Helm page, and the editor only with the dialog.
+
+/** Something being waited for: a turning circle, and with `bar` a moving
+    line under it. After a few seconds `slow` says why it takes a while. */
+export function Loading({ text, bar, slow }: { text: string; bar?: boolean; slow?: string }) {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!slow) return;
+    const t = setTimeout(() => setLate(true), 6000);
+    return () => clearTimeout(t);
+  }, [slow]);
+  return (
+    <div className="cat-loading" role="status" aria-live="polite">
+      <div className="cat-loading-line">
+        <span className="cat-spin" aria-hidden="true" />
+        <span>{text}</span>
+      </div>
+      {bar && (
+        <div className="cat-progress" aria-hidden="true">
+          <span />
+        </div>
+      )}
+      {late && slow && <div className="muted cat-loading-slow">{slow}</div>}
+    </div>
+  );
+}
 
 /** "StatefulSet ×1 · Service ×2", in the order the objects came. */
 export function objectSummary(objects: { kind: string }[]): string {
@@ -25,7 +51,19 @@ export function CheckResult({
   upgrade?: boolean;
 }) {
   if (error) return <div className="ing-check err">⚠ {error}</div>;
-  if (!check) return <div className="ing-check muted-box">{checking ? "Checking the chart…" : "Not checked yet"}</div>;
+  if (!check)
+    return (
+      <div className="ing-check muted-box">
+        {checking ? (
+          <span className="cat-loading-line">
+            <span className="cat-spin" aria-hidden="true" />
+            Checking the chart against the cluster…
+          </span>
+        ) : (
+          "Not checked yet"
+        )}
+      </div>
+    );
   const errors = check.problems.filter((p) => p.level === "error");
   const warns = check.problems.filter((p) => p.level === "warn");
   const found = check.imageStates.filter((s) => !s.missing && !s.unknown).length;

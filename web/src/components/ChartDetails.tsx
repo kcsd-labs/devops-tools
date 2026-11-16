@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useApi } from "../useApi";
 import type { CatalogChart, CatalogPackage } from "../api";
 import { Markdown } from "./Markdown";
+import { Loading } from "./Catalog";
 
 // What a chart is, before anyone installs it: its description, versions, where
 // it is published, and its README.
@@ -74,7 +75,7 @@ export function ChartDetails({
             </div>
           </div>
           {error && <div className="alert">{error}</div>}
-          {!info && !error && <div className="muted pad">Fetching the chart…</div>}
+          {!info && !error && <Loading text="Fetching the chart…" bar slow="The chart is downloaded from where its author publishes it — a large one can take up to a minute." />}
           {info && (
             <div className="cat-readme-md">
               {info.readme ? <Markdown source={info.readme} /> : <div className="muted">The chart has no README.</div>}

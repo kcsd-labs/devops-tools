@@ -4,7 +4,7 @@ import { yaml } from "@codemirror/lang-yaml";
 import { useApi } from "../useApi";
 import { useEditorTheme } from "../editorTheme";
 import { CatalogError, type CatalogCheck, type HelmRequest } from "../api";
-import { CheckResult, RequestStatus, ago, requestLine, requestNote } from "../components/Catalog";
+import { CheckResult, Loading, RequestStatus, ago, requestLine, requestNote } from "../components/Catalog";
 import { pushToast } from "../toasts";
 
 // Requests to install or upgrade from the catalog, for the administrators who
@@ -59,7 +59,7 @@ export function HelmRequests() {
 
       {error && <div className="alert">{error}</div>}
       <div className="card no-pad">
-        {list === null && !error && <div className="muted center pad">Loading…</div>}
+        {list === null && !error && <Loading text="Loading the requests…" />}
         {list !== null && shown.length === 0 && (
           <div className="muted center pad">{tab === "waiting" ? "Nothing waits for an answer" : "No answered requests yet"}</div>
         )}
