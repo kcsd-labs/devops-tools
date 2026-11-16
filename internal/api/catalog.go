@@ -434,6 +434,8 @@ type catalogAsk struct {
 	Values  string `json:"values"`
 	// NewNamespace asks for the namespace to be created with the release.
 	NewNamespace bool `json:"newNamespace"`
+	// Known are the required values the form already has fields for.
+	Known []string `json:"known,omitempty"`
 }
 
 // checkResult is a plan, with what the registries said about its images.
@@ -526,11 +528,11 @@ func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDige
 			return
 		}
 		attrs := []any{"chart", ask.Repo + "/" + ask.Chart, "version", ask.Version, "namespace", ns,
-			"total", total.Round(time.Millisecond), "fetch", fetchTook.Round(time.Millisecond),
-			"images", imagesTook.Round(time.Millisecond)}
+			"total", total.Round(time.Millisecond).String(), "fetch", fetchTook.Round(time.Millisecond).String(),
+			"images", imagesTook.Round(time.Millisecond).String()}
 		if planned != nil {
 			for _, t := range planned.Timings {
-				attrs = append(attrs, t.Part, t.Took.Round(time.Millisecond))
+				attrs = append(attrs, t.Part, t.Took.Round(time.Millisecond).String())
 			}
 		}
 		if ctx.Err() != nil {
@@ -563,7 +565,7 @@ func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDige
 		}
 		res.FromVersion = cur.Version
 	}
-	plan, err := s.catalog.planner(ctx, ns, ask.Release, arc.Chart, vals, upgrade)
+	plan, err := s.catalog.planner(kube.WithKnownRequired(ctx, ask.Known), ns, ask.Release, arc.Chart, vals, upgrade)
 	if err != nil {
 		return nil, nil, nil, err
 	}

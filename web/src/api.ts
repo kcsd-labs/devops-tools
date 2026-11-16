@@ -153,6 +153,8 @@ export interface CatalogAsk {
   values: string;
   /** Create the namespace with the release. */
   newNamespace?: boolean;
+  /** Required values the form already has fields for: nothing to search for. */
+  known?: string[];
 }
 
 export interface HelmRequest {

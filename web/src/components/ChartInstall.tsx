@@ -122,6 +122,8 @@ export function ChartInstall(props: InstallProps) {
   const [formKey, setFormKey] = useState(0);
   // Every key the chart asked for, kept once asked so the field stays.
   const [asked, setAsked] = useState<{ key: string; said: string }[]>([]);
+  const askedRef = useRef(asked);
+  askedRef.current = asked;
 
   const chooseView = (v: View) => {
     setView(v);
@@ -224,7 +226,7 @@ export function ChartInstall(props: InstallProps) {
       running.current = ctl;
       setCheckStarted(Date.now());
       api
-        .catalogCheck(target, ask, ctl.signal)
+        .catalogCheck(target, { ...ask, known: askedRef.current.map((a) => a.key) }, ctl.signal)
         .then((c) => {
           if (n !== seq.current) return;
           setCheck(c);

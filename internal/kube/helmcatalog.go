@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -155,6 +156,7 @@ func (p *ReleasePlan) warn(format string, a ...any) {
 func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *chart.Chart, vals map[string]any, upgrade bool) (*ReleasePlan, error) {
 	plan := &ReleasePlan{Objects: []PlanObject{}, Problems: []PlanProblem{}, Images: []string{}}
 
+	began := time.Now()
 	defined := chartKinds(ch)
 	if len(defined) > 0 {
 		names := make([]string, 0, len(defined))
@@ -186,7 +188,8 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		// Nothing to ask the cluster about a namespace that is not there:
 		// rendered as helm template would, it is created with the release.
 		plan.NewNamespace = true
-		began := time.Now()
+		plan.Timings = append(plan.Timings, Timing{"prepare", time.Since(began)})
+		began = time.Now()
 		rel, err := m.renderOffline(namespace, name, ch, vals)
 		plan.Timings = append(plan.Timings, Timing{"render", time.Since(began)})
 		if err != nil {
@@ -215,7 +218,8 @@ func (m *Manager) PlanRelease(ctx context.Context, namespace, name string, ch *c
 		return plan, nil
 	}
 
-	began := time.Now()
+	plan.Timings = append(plan.Timings, Timing{"prepare", time.Since(began)})
+	began = time.Now()
 	rel, err := m.dryRun(ctx, cfg, namespace, name, ch, vals, upgrade)
 	plan.Timings = append(plan.Timings, Timing{"render", time.Since(began)})
 	if err != nil && staleKinds(err) {
@@ -279,7 +283,7 @@ const (
 // for nothing new. Whoever installs then fills them in one go instead of one
 // check at a time.
 func (m *Manager) askAllAtOnce(ctx context.Context, plan *ReleasePlan, namespace, name string, ch *chart.Chart, vals map[string]any) {
-	if len(plan.Required) == 0 {
+	if len(plan.Required) == 0 || allKnown(ctx, plan.Required) {
 		return
 	}
 	// A large chart takes seconds to render: the search stops when its time
@@ -321,6 +325,31 @@ func (m *Manager) askAllAtOnce(ctx context.Context, plan *ReleasePlan, namespace
 			}
 		}
 	}
+}
+
+type knownKey struct{}
+
+// WithKnownRequired says which required values whoever checks already has a
+// field for: when the chart asks for none other, there is nothing to search.
+func WithKnownRequired(ctx context.Context, keys []string) context.Context {
+	set := map[string]bool{}
+	for _, k := range keys {
+		set[k] = true
+	}
+	return context.WithValue(ctx, knownKey{}, set)
+}
+
+func allKnown(ctx context.Context, required []RequiredValue) bool {
+	known, _ := ctx.Value(knownKey{}).(map[string]bool)
+	if len(known) == 0 {
+		return false
+	}
+	for _, r := range required {
+		if !known[r.Key] {
+			return false
+		}
+	}
+	return true
 }
 
 // copyValues copies values deeply, so a probe does not touch the real ones.
@@ -438,6 +467,31 @@ func (m *Manager) renderOffline(namespace, name string, ch *chart.Chart, vals ma
 // chartKinds are the kinds a chart defines in its crds/ directories, each
 // with whether it is cluster-wide.
 func chartKinds(ch *chart.Chart) map[schema.GroupKind]bool {
+	// Read once per chart version: resource definitions run to megabytes,
+	// and a chart is checked at every change of its values.
+	key := ch.Metadata.Name + "@" + ch.Metadata.Version
+	kindsMu.Lock()
+	got, ok := kindsSeen[key]
+	kindsMu.Unlock()
+	if ok {
+		return got
+	}
+	out := readChartKinds(ch)
+	kindsMu.Lock()
+	if len(kindsSeen) > 64 {
+		kindsSeen = map[string]map[schema.GroupKind]bool{}
+	}
+	kindsSeen[key] = out
+	kindsMu.Unlock()
+	return out
+}
+
+var (
+	kindsMu   sync.Mutex
+	kindsSeen = map[string]map[schema.GroupKind]bool{}
+)
+
+func readChartKinds(ch *chart.Chart) map[schema.GroupKind]bool {
 	out := map[schema.GroupKind]bool{}
 	for _, crd := range ch.CRDObjects() {
 		for _, text := range releaseutil.SplitManifests(string(crd.File.Data)) {

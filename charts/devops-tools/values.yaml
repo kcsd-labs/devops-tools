@@ -94,6 +94,10 @@ ingress:
   #   hosts:
   #     - devops-tools.example.com
 
+# The Helm catalog renders each chart in this pod, at every change of its
+# values. Most charts take well under a second; a large one like GitLab's
+# takes seconds of CPU, and under a limit of 500m that turns into ten. Give it
+# a limit of 1–2 CPUs if such charts are installed from the catalog.
 resources:
   limits:
     cpu: 500m
