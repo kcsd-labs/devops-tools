@@ -11,6 +11,7 @@ import (
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/releaseutil"
 	"helm.sh/helm/v3/pkg/storage/driver"
@@ -472,7 +473,30 @@ func (m *Manager) renderOffline(namespace, name string, ch *chart.Chart, vals ma
 	i := action.NewInstall(cfg)
 	i.Namespace, i.ReleaseName = namespace, name
 	i.DryRun, i.DryRunOption, i.ClientOnly = true, "client", true
+	// Without the cluster Helm makes up a Kubernetes 1.20 and its APIs, and a
+	// chart that needs a newer one refuses. The cluster's own are told instead.
+	if kv, apis := m.clusterCapabilities(); kv != nil {
+		i.KubeVersion, i.APIVersions = kv, apis
+	}
 	return i.Run(ch, vals)
+}
+
+// clusterCapabilities are the cluster's Kubernetes version and API versions,
+// from the kept discovery; nil when the cluster cannot be asked.
+func (m *Manager) clusterCapabilities() (*chartutil.KubeVersion, chartutil.VersionSet) {
+	dc, err := m.portalDiscovery()
+	if err != nil {
+		return nil, nil
+	}
+	v, err := dc.ServerVersion()
+	if err != nil {
+		return nil, nil
+	}
+	apis, err := action.GetVersionSet(dc)
+	if err != nil {
+		apis = nil
+	}
+	return &chartutil.KubeVersion{Version: v.GitVersion, Major: v.Major, Minor: v.Minor}, apis
 }
 
 // chartKinds are the kinds a chart defines in its crds/ directories, each
