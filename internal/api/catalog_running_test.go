@@ -140,3 +140,27 @@ func TestRemovedReleasesLeaveTheList(t *testing.T) {
 		t.Errorf("listed %s, want a, d and f", got)
 	}
 }
+
+func TestAnInstallAgainHidesTheOneBefore(t *testing.T) {
+	f := newCatalogFixture(t)
+	then, now := time.Now().Add(-time.Hour), time.Now()
+	for _, q := range []*helmreq.Request{
+		{ID: "old", Release: "redis", Status: helmreq.StatusFailed, Decided: &then},
+		{ID: "new", Release: "redis", Status: helmreq.StatusInstalled, Decided: &now},
+		{ID: "asked", Release: "redis", Status: helmreq.StatusWaiting, Expires: now.Add(time.Hour)},
+	} {
+		q.Namespace, q.Requester, q.Created = "payments-dev", "anna", now
+		if err := f.s.catalog.requests.Create(context.Background(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, list := f.callList(t, "anna", "/api/helm/my-requests")
+	var ids []string
+	for _, q := range list {
+		ids = append(ids, q["id"].(string))
+	}
+	sort.Strings(ids)
+	if got := strings.Join(ids, ","); got != "asked,new" {
+		t.Errorf("listed %s, want asked and new", got)
+	}
+}

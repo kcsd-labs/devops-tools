@@ -96,16 +96,18 @@ type requestView struct {
 	MayStop bool `json:"mayStop,omitempty"`
 }
 
-// viewRequests shows requests to a caller. Installs that nothing runs any
-// more — the portal restarted under them — are settled first.
-func (s *Server) viewRequests(ctx context.Context, user *auth.User, list []*helmreq.Request) []requestView {
+// viewRequests shows requests to a caller, out of all there are. Installs
+// that nothing runs any more — the portal restarted under them — are settled
+// first.
+func (s *Server) viewRequests(ctx context.Context, user *auth.User, list, all []*helmreq.Request) []requestView {
 	out := make([]requestView, 0, len(list))
 	gone := s.goneReleases()
+	last := lastStarted(all)
 	for _, q := range list {
 		if q.Status == helmreq.StatusInstalling {
 			q = s.settleOrphan(ctx, q)
 		}
-		if removed(q, gone) {
+		if removed(q, gone) || superseded(q, last) {
 			continue
 		}
 		v := requestView{Request: q.Redacted()}
@@ -294,4 +296,36 @@ func (s *Server) goneReleases() func(ns, release string) bool {
 // it cannot tell.
 func (s *Server) releaseExists(ns, release string) bool {
 	return !s.goneReleases()(ns, release)
+}
+
+// lastStarted is, for each release, the request that last ran Helm on it.
+func lastStarted(all []*helmreq.Request) map[string]*helmreq.Request {
+	last := map[string]*helmreq.Request{}
+	for _, q := range all {
+		if !ran(q) {
+			continue
+		}
+		k := q.Namespace + "/" + q.Release
+		if p := last[k]; p == nil || q.Decided.After(*p.Decided) {
+			last[k] = q
+		}
+	}
+	return last
+}
+
+// superseded: a request that ran Helm on a release a later request ran it on
+// again — installed it anew or upgraded it. The release is what the later
+// one made, and the earlier one's ending, failed or not, is history.
+func superseded(q *helmreq.Request, last map[string]*helmreq.Request) bool {
+	p := last[q.Namespace+"/"+q.Release]
+	return ran(q) && p != nil && p.ID != q.ID
+}
+
+// ran: the request was approved and Helm ran it.
+func ran(q *helmreq.Request) bool {
+	switch q.Status {
+	case helmreq.StatusInstalling, helmreq.StatusInstalled, helmreq.StatusFailed:
+		return q.Decided != nil
+	}
+	return false
 }

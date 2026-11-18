@@ -823,7 +823,7 @@ func (s *Server) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 			mine = append(mine, q)
 		}
 	}
-	writeJSON(w, http.StatusOK, s.viewRequests(r.Context(), user, mine))
+	writeJSON(w, http.StatusOK, s.viewRequests(r.Context(), user, mine, all))
 }
 
 func (s *Server) handleWithdrawRequest(w http.ResponseWriter, r *http.Request) {
@@ -860,7 +860,7 @@ func (s *Server) handleAllRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, _ := auth.FromContext(r.Context())
-	writeJSON(w, http.StatusOK, s.viewRequests(r.Context(), user, all))
+	writeJSON(w, http.StatusOK, s.viewRequests(r.Context(), user, all, all))
 }
 
 func (s *Server) handleRequestCount(w http.ResponseWriter, r *http.Request) {
