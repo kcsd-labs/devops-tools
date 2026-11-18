@@ -62,6 +62,10 @@ type catalog struct {
 	templates helmreq.Templates
 	// secretExists says whether a namespace has a Secret by that name.
 	secretExists func(ctx context.Context, ns, name string) (bool, error)
+	// progress is how far a release's pods have come.
+	progress func(ctx context.Context, ns, name string) *kube.InstallProgress
+	// running are the installs under way here.
+	running installs
 }
 
 // WithCatalog switches the catalog on.
@@ -76,6 +80,7 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 	c.hints = s.kube.GetClusterHints
 	c.nsExists = s.kube.NamespaceExists
 	c.secretExists = s.kube.SecretExists
+	c.progress = s.kube.ReleaseProgress
 	c.templates = helmreq.NewMemoryTemplates()
 	c.namespaces = func(ctx context.Context) ([]string, error) {
 		return s.kube.ListNamespaces(ctx, "", s.cfg.Cluster.HiddenNamespaces)
@@ -128,6 +133,7 @@ func (s *Server) catalogRoutes(r chi.Router, base string) {
 	// Withdrawing is the requester's, or an administrator's — a request for a
 	// new namespace is one its requester holds nothing in yet.
 	r.Delete(base+"/helm/requests/{id}", s.requirePackages(s.handleWithdrawRequest))
+	r.Post(base+"/helm/requests/{id}/stop", s.requirePackages(s.handleStopInstall))
 
 	r.Get("/helm/requests", s.requireGlobalOp(OpUserManage, s.handleAllRequests))
 	r.Get("/helm/requests/count", s.requireGlobalOp(OpUserManage, s.handleRequestCount))
@@ -304,6 +310,8 @@ type catalogReleaseRow struct {
 	MayUpgrade bool `json:"mayUpgrade"`
 	// MayList: the Helm releases page, with the history, is open to them.
 	MayList bool `json:"mayList"`
+	// MayUninstall: they may remove it.
+	MayUninstall bool `json:"mayUninstall"`
 }
 
 // handleCatalogReleases lists the releases installed from the catalog in the
@@ -321,9 +329,10 @@ func (s *Server) handleCatalogReleases(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out = append(out, catalogReleaseRow{
-			HelmRelease: rel,
-			MayUpgrade:  s.authz.Allowed(user.Roles, rel.Namespace, OpHelmUpgrade),
-			MayList:     s.authz.Allowed(user.Roles, rel.Namespace, OpHelmList),
+			HelmRelease:  rel,
+			MayUpgrade:   s.authz.Allowed(user.Roles, rel.Namespace, OpHelmUpgrade),
+			MayList:      s.authz.Allowed(user.Roles, rel.Namespace, OpHelmList),
+			MayUninstall: s.authz.Allowed(user.Roles, rel.Namespace, OpHelmUninstall),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -807,14 +816,14 @@ func (s *Server) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := []*helmreq.Request{}
+	mine := []*helmreq.Request{}
 	for _, q := range all {
 		if q.Requester == user.Username || s.mayAskFor(user.Roles, q.Namespace) ||
 			s.authz.Allowed(user.Roles, q.Namespace, OpHelmList) {
-			out = append(out, q.Redacted())
+			mine = append(mine, q)
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, s.viewRequests(r.Context(), user, mine))
 }
 
 func (s *Server) handleWithdrawRequest(w http.ResponseWriter, r *http.Request) {
@@ -850,11 +859,8 @@ func (s *Server) handleAllRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	shown := make([]*helmreq.Request, len(all))
-	for i, q := range all {
-		shown[i] = q.Redacted()
-	}
-	writeJSON(w, http.StatusOK, shown)
+	user, _ := auth.FromContext(r.Context())
+	writeJSON(w, http.StatusOK, s.viewRequests(r.Context(), user, all))
 }
 
 func (s *Server) handleRequestCount(w http.ResponseWriter, r *http.Request) {
@@ -1024,16 +1030,30 @@ func (s *Server) handleRejectRequest(w http.ResponseWriter, r *http.Request) {
 // takes minutes, longer than anyone should hold a request open for. The
 // request says how it ended.
 func (s *Server) startInstall(q *helmreq.Request, ch *chart.Chart, vals map[string]any) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Catalog.InstallTimeout+time.Minute)
+	run := &runningInstall{namespace: q.Namespace, release: q.Release, cancel: cancel, finished: make(chan struct{})}
+	s.catalog.running.add(q.ID, run)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Catalog.InstallTimeout+time.Minute)
 		defer cancel()
+		defer s.catalog.running.done(q.ID)
 		err := s.catalog.installer(ctx, q, ch, vals)
+		close(run.finished)
 		status, detail := helmreq.StatusInstalled, ""
 		if err != nil {
 			status, detail = helmreq.StatusFailed, err.Error()
-			if trouble := s.catalog.trouble(ctx, q.Namespace, q.Release); trouble != "" {
+			if by, why := run.stopped(); by != "" {
+				detail = "stopped by " + by
+				if why != "" {
+					detail += " " + why
+				}
+				detail += "; the release is left failed — uninstall it under Installed, or try again"
+			}
+			// Read afresh: the install's own time may be what ran out.
+			tctx, tcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if trouble := s.catalog.trouble(tctx, q.Namespace, q.Release); trouble != "" {
 				detail += " — " + trouble
 			}
+			tcancel()
 		}
 		if _, uerr := s.catalog.requests.Update(context.Background(), q.ID, func(r *helmreq.Request) error {
 			r.Status, r.Detail = status, detail

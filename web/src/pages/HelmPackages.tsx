@@ -19,7 +19,7 @@ const ChartDetails = lazy(() => import("../components/ChartDetails").then((m) =>
 
 type Access = { install: boolean; upgrade: boolean; direct: boolean; newNamespace?: boolean };
 type View = "catalog" | "installed" | "requests";
-type CatalogRelease = HelmRelease & { mayUpgrade: boolean; mayList: boolean };
+type CatalogRelease = HelmRelease & { mayUpgrade: boolean; mayList: boolean; mayUninstall: boolean };
 
 /** What the install dialog is open for. */
 type Installing = {
@@ -147,7 +147,7 @@ export function HelmPackages() {
           onPick={(p) => setInstalling({ kind: "install", repo: p.repo, chart: p.name })}
         />
       )}
-      {access && view === "installed" && <InstalledList onUpgrade={startUpgrade} />}
+      {access && view === "installed" && <InstalledList onUpgrade={startUpgrade} alertDlg={alertDlg} confirm={confirm} />}
       {access && view === "requests" && (
         <RequestList
           onSendAgain={(q) =>
@@ -289,13 +289,32 @@ function CatalogList({
   );
 }
 
+/** A release's state as Helm keeps it, when it is not simply up. */
+const RELEASE_STATE: Record<string, [string, string]> = {
+  "pending-install": ["Installing…", "badge-muted"],
+  "pending-upgrade": ["Upgrading…", "badge-muted"],
+  "pending-rollback": ["Rolling back…", "badge-muted"],
+  uninstalling: ["Uninstalling…", "badge-muted"],
+  failed: ["Failed", "badge-err"],
+};
+
 /** What was installed from the catalog, in every namespace one works in. */
-function InstalledList({ onUpgrade }: { onUpgrade: (r: HelmRelease) => void }) {
+function InstalledList({
+  onUpgrade,
+  alertDlg,
+  confirm,
+}: {
+  onUpgrade: (r: HelmRelease) => void;
+  alertDlg: (msg: string, title?: string) => Promise<unknown>;
+  confirm: ConfirmFn;
+}) {
   const api = useApi();
   const [list, setList] = useState<CatalogRelease[] | null>(null);
   const [error, setError] = useState("");
+  const [shown, setShown] = useState<{ title: string; sub: string; parts: ValuesPart[] } | null>(null);
+  const [busy, setBusy] = useState("");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api
       .catalogReleases()
       .then((l) => {
@@ -304,6 +323,51 @@ function InstalledList({ onUpgrade }: { onUpgrade: (r: HelmRelease) => void }) {
       })
       .catch((e) => setError(e.message));
   }, [api]);
+  useEffect(load, [load]);
+  // Something still moving is looked at again.
+  const moving = list?.some((r) => r.status.startsWith("pending") || r.status === "uninstalling");
+  useEffect(() => {
+    if (!moving) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [moving, load]);
+
+  const values = async (r: CatalogRelease) => {
+    try {
+      const cur = await api.catalogRelease(r.namespace, r.name);
+      setShown({
+        title: `${r.name} · ${r.namespace}`,
+        sub: `${r.chart} ${r.version} · revision ${r.revision}`,
+        parts: [{ label: "Installed with", text: cur.values }],
+      });
+    } catch (e: any) {
+      void alertDlg(e.message, "Error");
+    }
+  };
+
+  const uninstall = async (r: CatalogRelease) => {
+    const ok = await confirm({
+      title: "Uninstall release",
+      message:
+        `Uninstall ${r.name} from ${r.namespace}? Its pods, services and the rest of what the chart made are removed. ` +
+        "Volumes (PVCs) and Secrets made with the install stay, with the data in them: delete those in the namespace if nothing needs them." +
+        (r.status.startsWith("pending") ? " The install still under way is stopped first." : ""),
+      okText: "Uninstall",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(r.namespace + "/" + r.name);
+    try {
+      const res = await api.uninstall(r.namespace, r.name);
+      if (res.warning) void alertDlg(res.warning, "Uninstalled, with leftovers");
+      else pushToast(`${r.name} uninstalled from ${r.namespace}`);
+      load();
+    } catch (e: any) {
+      void alertDlg(e.message, "Error");
+    } finally {
+      setBusy("");
+    }
+  };
 
   return (
     <div className="card no-pad">
@@ -315,32 +379,90 @@ function InstalledList({ onUpgrade }: { onUpgrade: (r: HelmRelease) => void }) {
       {list === null && !error && <Loading text="Looking through the releases…" />}
       {list?.length === 0 && <div className="muted center pad">Nothing was installed from the catalog yet</div>}
       <div className="cat-list">
-        {list?.map((r) => (
-          <div className="cat-row" key={r.namespace + "/" + r.name}>
-            <div className="cat-main">
-              <div>
-                <b className="mono">{r.name}</b> <span className="cm-pill">{r.namespace}</span>{" "}
-                <span className="muted">
-                  {r.chart} {r.version} · {r.catalog?.repo}
-                </span>
+        {list?.map((r) => {
+          const state = RELEASE_STATE[r.status];
+          const key = r.namespace + "/" + r.name;
+          return (
+            <div className="cat-row" key={key}>
+              <div className="cat-main">
+                <div>
+                  <b className="mono">{r.name}</b> <span className="cm-pill">{r.namespace}</span>{" "}
+                  <span className="muted">
+                    {r.chart} {r.version} · {r.catalog?.repo}
+                  </span>
+                </div>
+                <div className="muted cat-desc-line">
+                  revision {r.revision} · {r.status}
+                  {r.updated ? ` · ${new Date(r.updated).toLocaleString()}` : ""}
+                </div>
               </div>
-              <div className="muted cat-desc-line">
-                revision {r.revision} · {r.status}
-                {r.updated ? ` · ${new Date(r.updated).toLocaleString()}` : ""}
-              </div>
+              {state && <span className={"badge " + state[1]}>{state[0]}</span>}
+              {r.mayUpgrade && (
+                <button className="btn ghost sm" onClick={() => values(r)}>
+                  Values
+                </button>
+              )}
+              {r.mayList && (
+                <Link className="btn ghost sm" to={`/ns/${r.namespace}/helm`}>
+                  History
+                </Link>
+              )}
+              {r.mayUninstall && (
+                <button className="btn ghost sm danger-text" disabled={busy === key} onClick={() => uninstall(r)}>
+                  {busy === key ? "Uninstalling…" : "Uninstall"}
+                </button>
+              )}
+              {r.mayUpgrade && !r.status.startsWith("pending") && (
+                <button className="btn sm" onClick={() => onUpgrade(r)}>
+                  Upgrade
+                </button>
+              )}
             </div>
-            {r.mayList && (
-              <Link className="btn ghost sm" to={`/ns/${r.namespace}/helm`}>
-                History
-              </Link>
-            )}
-            {r.mayUpgrade && (
-              <button className="btn sm" onClick={() => onUpgrade(r)}>
-                Upgrade
-              </button>
-            )}
+          );
+        })}
+      </div>
+      {shown && <ValuesModal {...shown} onClose={() => setShown(null)} />}
+    </div>
+  );
+}
+
+type ValuesPart = { label: string; text: string };
+
+/** Values to read, copy or save: what a release or a request holds. */
+function ValuesModal({ title, sub, parts, onClose }: { title: string; sub: string; parts: ValuesPart[]; onClose: () => void }) {
+  const copy = (text: string) => {
+    void navigator.clipboard?.writeText(text).then(
+      () => pushToast("Values copied"),
+      () => pushToast("The browser did not allow copying"),
+    );
+  };
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal ing-editor" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div className="muted">{sub}</div>
+            <div className="modal-title mono">{title}</div>
           </div>
-        ))}
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <div className={"modal-body pad" + (parts.length > 1 ? " ing-two" : "")}>
+          {parts.map((p) => (
+            <div key={p.label}>
+              <div className="cat-values-head">
+                <span className="muted">{p.label}</span>
+                {p.text && (
+                  <button className="btn ghost sm" onClick={() => copy(p.text)}>
+                    Copy
+                  </button>
+                )}
+              </div>
+              <pre className="cat-readme">{p.text || "(chart defaults)"}</pre>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -362,7 +484,7 @@ function RequestList({
   const api = useApi();
   const [list, setList] = useState<HelmRequest[] | null>(null);
   const [error, setError] = useState("");
-  const [changesOf, setChangesOf] = useState<HelmRequest | null>(null);
+  const [valuesOf, setValuesOf] = useState<HelmRequest | null>(null);
 
   const load = useCallback(() => {
     api
@@ -381,6 +503,24 @@ function RequestList({
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [open, load]);
+
+  const stop = async (q: HelmRequest) => {
+    const ok = await confirm({
+      title: "Stop the install",
+      message:
+        `Stop waiting for ${q.release} in ${q.namespace}? What was already created stays, and the release is marked failed: ` +
+        "uninstall it under Installed, or change the values and try again.",
+      okText: "Stop",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.stopInstall(q.namespace, q.id);
+      setTimeout(load, 800);
+    } catch (e: any) {
+      void alertDlg(e.message, "Error");
+    }
+  };
 
   const withdraw = async (q: HelmRequest) => {
     const ok = await confirm({
@@ -415,6 +555,7 @@ function RequestList({
                 <span className="muted">{requestLine(q)}</span>
               </div>
               <div className={"cat-desc-line " + (q.status === "failed" ? "cat-failed" : "muted")}>{requestNote(q)}</div>
+              {q.status === "installing" && q.progress && <InstallProgress p={q.progress} />}
             </div>
             <RequestStatus r={q} />
             {q.status === "waiting" && (
@@ -422,11 +563,14 @@ function RequestList({
                 Withdraw
               </button>
             )}
-            {q.askedValues !== undefined && q.askedValues !== null && (
-              <button className="btn ghost sm" onClick={() => setChangesOf(q)}>
-                What changed
+            {q.status === "installing" && q.mayStop && (
+              <button className="btn ghost sm danger-text" onClick={() => stop(q)}>
+                Stop
               </button>
             )}
+            <button className="btn ghost sm" onClick={() => setValuesOf(q)}>
+              {q.askedValues != null ? "Values · changed" : "Values"}
+            </button>
             {["expired", "rejected", "failed", "withdrawn"].includes(q.status) && (
               <button className="btn ghost sm" onClick={() => onSendAgain(q)}>
                 {q.status === "failed" ? "Try again" : "Send again"}
@@ -435,33 +579,42 @@ function RequestList({
           </div>
         ))}
       </div>
-      {changesOf && (
-        <div className="modal-overlay" onClick={() => setChangesOf(null)}>
-          <div className="modal ing-editor" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <div>
-                <div className="muted">Changed on approval by {changesOf.decider}</div>
-                <div className="modal-title mono">
-                  {changesOf.release} · {changesOf.namespace}
-                </div>
-              </div>
-              <button className="icon-btn" onClick={() => setChangesOf(null)} aria-label="Close">
-                ✕
-              </button>
-            </div>
-            <div className="modal-body pad ing-two">
-              <div>
-                <div className="muted">You asked for</div>
-                <pre className="cat-readme">{changesOf.askedValues || "(chart defaults)"}</pre>
-              </div>
-              <div>
-                <div className="muted">Installed with</div>
-                <pre className="cat-readme">{changesOf.values || "(chart defaults)"}</pre>
-              </div>
-            </div>
-          </div>
-        </div>
+      {valuesOf && (
+        <ValuesModal
+          title={`${valuesOf.release} · ${valuesOf.namespace}`}
+          sub={
+            `${valuesOf.chart} ${valuesOf.version}` +
+            (valuesOf.secrets?.length
+              ? ` · Secrets made with it: ${valuesOf.secrets.map((x) => `${x.name} (${(x.keys ?? []).join(", ")})`).join("; ")}`
+              : "")
+          }
+          parts={
+            valuesOf.askedValues != null
+              ? [
+                  { label: "You asked for", text: valuesOf.askedValues },
+                  { label: `Installed with — changed by ${valuesOf.decider}`, text: valuesOf.values },
+                ]
+              : [{ label: valuesOf.status === "waiting" ? "Asked with" : "Installed with", text: valuesOf.values }]
+          }
+          onClose={() => setValuesOf(null)}
+        />
       )}
+    </div>
+  );
+}
+
+/** How far an install has come: pods ready, and what holds the rest. */
+function InstallProgress({ p }: { p: NonNullable<HelmRequest["progress"]> }) {
+  return (
+    <div className="cat-progress-note">
+      <div className="muted">
+        {p.pods === 0 ? "No pods yet" : `Pods ready: ${p.ready} of ${p.pods}`}
+      </div>
+      {(p.trouble ?? []).map((t, i) => (
+        <div key={i} className="cat-trouble">
+          {t}
+        </div>
+      ))}
     </div>
   );
 }

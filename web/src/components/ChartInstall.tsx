@@ -839,6 +839,7 @@ function InstallForm({
   const [tls, setTls] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [kept, setKept] = useState<string[]>([]);
+  const [ownDomain, setOwnDomain] = useState(true);
 
   const sp = settings.ingresses[spot];
   const domainShape = sp?.shape === "domain";
@@ -889,8 +890,14 @@ function InstallForm({
     const on = switches[c.key];
     if (on !== undefined && on !== c.on && !more[c.key]) more[c.key] = String(on);
   }
+  // A chart building addresses of its own pods needs the domain the cluster
+  // names services in; one that is not cluster.local is written for it.
+  const clusterDomain = hints?.clusterDomain ?? "";
+  const domainPaths = (settings.clusterDomain ?? []).filter((p) => clusterDomain && settings.defaults[p] !== clusterDomain);
+  const domainFill = install && ownDomain && domainPaths.length > 0 ? { clusterDomain, clusterDomainPaths: domainPaths } : {};
   const fill: ValuesFill = install
     ? {
+        ...domainFill,
         storageClass: storage,
         storagePaths: settings.storage,
         diskSizes,
@@ -911,9 +918,10 @@ function InstallForm({
   const written = useRef<string>("");
   useEffect(() => {
     if (written.current === "") {
-      // The form starts empty: nothing to write until something is chosen.
-      written.current = fillKey;
-      return;
+      // The form starts empty: nothing to write until something is chosen —
+      // but the cluster's own domain, which is no choice.
+      written.current = JSON.stringify({ ...fill, clusterDomain: undefined, clusterDomainPaths: undefined });
+      if (written.current === fillKey) return;
     }
     if (fillKey === written.current) return;
     let live = true;
@@ -1270,6 +1278,20 @@ function InstallForm({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {install && domainPaths.length > 0 && (
+        <div className="cat-question">
+          <label className="checkbox cat-q">
+            <input type="checkbox" checked={ownDomain} onChange={(e) => setOwnDomain(e.target.checked)} />
+            This cluster's domain: <span className="mono">{clusterDomain}</span>
+          </label>
+          <div className="cat-why">
+            The chart builds addresses of its own pods with {settings.defaults[domainPaths[0]] || "a domain"}; this cluster names its
+            services in {clusterDomain}, and the parts would not find each other with the chart's.
+          </div>
+          {handEdited(keptOf(domainPaths))}
         </div>
       )}
 

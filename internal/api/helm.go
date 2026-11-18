@@ -65,6 +65,8 @@ func (s *Server) handleUninstall(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
+	// An install still waiting for its pods is stopped first.
+	s.stopInstallOf(namespace, name, user.Username)
 	warning, err := s.kube.UninstallRelease(user.Username, namespace, name)
 	s.audit.Log(audit.Entry{
 		User: user.Username, Environment: s.cfg.Environment, Namespace: namespace,

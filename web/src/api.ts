@@ -108,6 +108,8 @@ export interface CatalogSettings {
   components?: { key: string; on: boolean; about: string; part?: boolean }[];
   /** Built-in parts (subcharts) by what each says it is. */
   parts?: Record<string, string>;
+  /** Keys naming the domain the cluster gives its services. */
+  clusterDomain?: string[];
 }
 
 export interface ClusterHints {
@@ -118,6 +120,8 @@ export interface ClusterHints {
   certs: { name: string; names: string[]; days: number }[];
   /** The namespace's Secrets: names and key names, never values. */
   secrets?: { name: string; keys: string[] }[];
+  /** The domain the cluster names its services in. */
+  clusterDomain?: string;
 }
 
 export interface ValuesFill {
@@ -144,6 +148,8 @@ export interface ValuesFill {
     credentials: string;
   };
   replicas?: Record<string, number>;
+  clusterDomain?: string;
+  clusterDomainPaths?: string[];
   /** Values typed for keys the chart asked for. */
   set?: Record<string, string>;
   /** Values typed for settings it takes without asking. */
@@ -221,6 +227,10 @@ export interface HelmRequest {
   secrets?: { name: string; keys?: string[] }[];
   grantedRoles?: string[];
   notes?: string;
+  /** While installing: how far the pods have come, and what holds the slow ones. */
+  progress?: { ready: number; pods: number; trouble?: string[] };
+  /** The caller can stop the install under way. */
+  mayStop?: boolean;
 }
 
 /** One of a requester's roles, as an approval offers to give it a new namespace. */
@@ -1046,7 +1056,7 @@ export function createApi(token: string | undefined) {
       catalogCall<{ install: boolean; upgrade: boolean; direct: boolean; newNamespace: boolean }>("GET", "/helm/access"),
     /** Releases installed from the catalog, in every namespace the caller may ask in. */
     catalogReleases: () =>
-      catalogCall<(HelmRelease & { mayUpgrade: boolean; mayList: boolean })[]>("GET", "/helm/catalog-releases"),
+      catalogCall<(HelmRelease & { mayUpgrade: boolean; mayList: boolean; mayUninstall: boolean })[]>("GET", "/helm/catalog-releases"),
     catalogSearch: (q: string, offset = 0) =>
       catalogCall<{ packages: CatalogPackage[]; total: number }>(
         "GET",
@@ -1081,6 +1091,8 @@ export function createApi(token: string | undefined) {
     myRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/my-requests"),
     withdrawRequest: (ns: string, id: string) =>
       catalogCall<HelmRequest>("DELETE", `/namespaces/${ns}/helm/requests/${id}`),
+    stopInstall: (ns: string, id: string) =>
+      catalogCall<{ status: string }>("POST", `/namespaces/${ns}/helm/requests/${id}/stop`),
     allRequests: () => catalogCall<HelmRequest[]>("GET", "/helm/requests"),
     requestCount: () => catalogCall<{ waiting: number }>("GET", "/helm/requests/count"),
     checkRequest: (id: string, values: string) =>

@@ -717,6 +717,10 @@ func (m *Manager) ListCatalogReleases() ([]HelmRelease, error) {
 	list := action.NewList(cfg)
 	list.AllNamespaces = true
 	list.Selector = labelCatalogRepo
+	// Whatever state it is in: one still installing, or left failed, is the
+	// one somebody wants to look at or remove.
+	list.StateMask = action.ListDeployed | action.ListFailed | action.ListPendingInstall |
+		action.ListPendingUpgrade | action.ListPendingRollback | action.ListUninstalling
 	rels, err := list.Run()
 	if err != nil {
 		return nil, err
@@ -732,39 +736,6 @@ func (m *Manager) ListCatalogReleases() ([]HelmRelease, error) {
 
 // ErrNotFromCatalog says a release was not installed from the catalog.
 var ErrNotFromCatalog = errors.New("this release was not installed from the catalog")
-
-// ReleaseTrouble says why a release's pods are not up: the first few that are
-// waiting or failing, with the reason Kubernetes gives. Empty when there is
-// nothing to say.
-func (m *Manager) ReleaseTrouble(ctx context.Context, namespace, name string) string {
-	cs, err := m.Clientset("")
-	if err != nil {
-		return ""
-	}
-	pods, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/instance=" + name,
-	})
-	if err != nil {
-		return ""
-	}
-	var out []string
-	for _, p := range pods.Items {
-		for _, st := range append(append([]corev1.ContainerStatus{}, p.Status.InitContainerStatuses...), p.Status.ContainerStatuses...) {
-			if w := st.State.Waiting; w != nil && w.Reason != "" && w.Reason != "PodInitializing" && w.Reason != "ContainerCreating" {
-				msg := "pod " + p.Name + ": " + w.Reason
-				if w.Message != "" {
-					msg += " — " + shorten(w.Message, 160)
-				}
-				out = append(out, msg)
-				break
-			}
-		}
-		if len(out) == 3 {
-			break
-		}
-	}
-	return strings.Join(out, "; ")
-}
 
 func trimHelmError(err error) string {
 	s := err.Error()
@@ -808,6 +779,9 @@ type ClusterHints struct {
 	// Secrets are the namespace's other Secrets, names and keys only, for a
 	// chart that takes the name of one holding a password.
 	Secrets []SecretHint `json:"secrets"`
+	// ClusterDomain is the domain services are named in, for a chart that
+	// builds addresses of its own pods: cluster.local unless set up otherwise.
+	ClusterDomain string `json:"clusterDomain,omitempty"`
 }
 
 // StorageClassHint is one storage class of the cluster.
@@ -826,7 +800,8 @@ type CertHint struct {
 // GetClusterHints reads the hints for a namespace with the portal's account.
 // Anything it cannot read is left out rather than failing: these are offers.
 func (m *Manager) GetClusterHints(ctx context.Context, namespace string) *ClusterHints {
-	h := &ClusterHints{StorageClasses: []StorageClassHint{}, IngressClasses: []string{}, Certs: []CertHint{}, Secrets: []SecretHint{}}
+	h := &ClusterHints{StorageClasses: []StorageClassHint{}, IngressClasses: []string{}, Certs: []CertHint{}, Secrets: []SecretHint{},
+		ClusterDomain: ClusterDomain()}
 	cs, err := m.Clientset("")
 	if err != nil {
 		return h

@@ -159,3 +159,23 @@ dags:
 		t.Errorf("password:\n%s", out)
 	}
 }
+
+func TestClusterDomain(t *testing.T) {
+	s := Detect(values(t, `
+clusterDomain: cluster.local
+global:
+  clusterDomain: cluster.local
+replica:
+  replicaCount: 3
+`))
+	if strings.Join(s.ClusterDomain, ",") != "clusterDomain,global.clusterDomain" || s.Defaults["clusterDomain"] != "cluster.local" {
+		t.Fatalf("cluster domain %v", s.ClusterDomain)
+	}
+	out, _, err := ApplyFill("clusterDomain: cluster.local\n", Fill{ClusterDomain: "k8s.example", ClusterDomainPaths: s.ClusterDomain}, Fill{})
+	if err != nil || !strings.Contains(out, "clusterDomain: k8s.example # the cluster's domain") {
+		t.Errorf("fill %v:\n%s", err, out)
+	}
+	if _, _, err := ApplyFill("", Fill{ClusterDomain: "a b", ClusterDomainPaths: []string{"clusterDomain"}}, Fill{}); err == nil {
+		t.Error("not a domain")
+	}
+}

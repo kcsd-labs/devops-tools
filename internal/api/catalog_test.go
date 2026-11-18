@@ -31,6 +31,7 @@ type catalogFixture struct {
 	mu     sync.Mutex
 	// installed receives the values each install ran with.
 	installed chan map[string]any
+	s         *Server
 }
 
 var catalogUsers = map[string][]string{"anna": {"dev"}, "bob": {"dev"}, "root": {"admin"}}
@@ -96,6 +97,9 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 		},
 		current: func(string, string) (*kube.CatalogRelease, error) { return nil, kube.ErrNotFromCatalog },
 		trouble: func(context.Context, string, string) string { return "" },
+		progress: func(context.Context, string, string) *kube.InstallProgress {
+			return &kube.InstallProgress{Ready: 1, Pods: 2, Trouble: []string{"redis-master-0: Unhealthy — Readiness probe failed"}}
+		},
 		releases: func(string) ([]kube.HelmRelease, error) {
 			return []kube.HelmRelease{{Name: "redis", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "redis"}}, {Name: "payments-api"}}, nil
 		},
@@ -130,6 +134,7 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 	})
 	r.Route("/api", func(r chi.Router) { s.catalogRoutes(r, "/namespaces/{namespace}") })
 	f.h = r
+	f.s = s
 	return f
 }
 

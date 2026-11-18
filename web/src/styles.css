@@ -3701,3 +3701,24 @@ a.seg-btn {
 .cat-review-secrets {
   margin-bottom: 8px;
 }
+
+/* An install under way: pods ready, and what holds the rest. */
+.cat-progress-note {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.cat-trouble {
+  color: var(--warn, #d97706);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.btn.danger-text {
+  color: var(--err);
+}
+.cat-values-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}

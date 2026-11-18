@@ -42,6 +42,9 @@ type Settings struct {
 	Components []Component `json:"components"`
 	// Parts are the subcharts included, each by what it says it is.
 	Parts map[string]string `json:"parts"`
+	// ClusterDomain are the keys naming the domain the cluster gives its
+	// services, for charts that build addresses of their own pods.
+	ClusterDomain []string `json:"clusterDomain,omitempty"`
 }
 
 // PasswordSpot is a password of the chart: one setting, or several that
@@ -152,6 +155,10 @@ func detect(values map[string]any, ownGlobal bool) Settings {
 				break
 			}
 		}
+		if v, ok := g["clusterDomain"]; ok && isString(v) {
+			s.ClusterDomain = append(s.ClusterDomain, "global.clusterDomain")
+			s.Defaults["global.clusterDomain"] = text(v)
+		}
 		// GitLab: every part gets a name in one domain.
 		hosts, _ := g["hosts"].(map[string]any)
 		ing, _ := g["ingress"].(map[string]any)
@@ -176,6 +183,10 @@ func detect(values map[string]any, ownGlobal bool) Settings {
 			switch {
 			case (k == "storageClass" || k == "storageClassName") && !isMap(v):
 				local = append(local, path)
+				continue
+			case k == "clusterDomain" && isString(v):
+				s.ClusterDomain = append(s.ClusterDomain, path)
+				s.Defaults[path] = text(v)
 				continue
 			case k == "resourcesPreset" && isString(v):
 				// The workloads' own, not their helpers': a metrics
@@ -264,6 +275,7 @@ func detect(values map[string]any, ownGlobal bool) Settings {
 	s.Presets = shallowFirst(s.Presets, 8)
 	s.Disks = shallowFirst(s.Disks, 8)
 	s.Replicas = shallowFirst(s.Replicas, 6)
+	sort.Strings(s.ClusterDomain)
 	s.Passwords = groupPasswords(shallowFirst(passwords, 10), s.Defaults)
 	sort.SliceStable(s.GitSources, func(i, j int) bool {
 		return strings.Count(s.GitSources[i].Path, ".") < strings.Count(s.GitSources[j].Path, ".") ||
@@ -419,6 +431,10 @@ type Fill struct {
 	Passwords map[string]string `json:"passwords"`
 	// Git loads content from a repository.
 	Git *GitFill `json:"git"`
+	// ClusterDomain is the cluster's domain, for every path in
+	// ClusterDomainPaths.
+	ClusterDomain      string   `json:"clusterDomain"`
+	ClusterDomainPaths []string `json:"clusterDomainPaths"`
 }
 
 // GitFill is a Git source to switch on.
@@ -447,8 +463,9 @@ type assign struct {
 }
 
 var (
-	diskRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(Mi|Gi|Ti)$`)
-	pathRE = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
+	diskRE   = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(Mi|Gi|Ti)$`)
+	domainRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+	pathRE   = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 )
 
 // The notes written beside what the form fills in, so the values say where
@@ -463,6 +480,7 @@ const (
 	noteExtra    = "from the install form"
 	notePassword = "password, from the install form"
 	noteGit      = "loads from Git, from the install form"
+	noteDomain   = "the cluster's domain, from the install form"
 )
 
 // assignments are the keys a fill sets, each with its value.
@@ -497,6 +515,14 @@ func (f Fill) assignments() (map[string]assign, error) {
 			return nil, fmt.Errorf("a disk size is a number with Mi, Gi or Ti, like 20Gi")
 		}
 		out[p] = assign{size, noteDisk}
+	}
+	if f.ClusterDomain != "" {
+		if !domainRE.MatchString(f.ClusterDomain) {
+			return nil, fmt.Errorf("%q is not a domain", f.ClusterDomain)
+		}
+		for _, p := range f.ClusterDomainPaths {
+			out[p] = assign{f.ClusterDomain, noteDomain}
+		}
 	}
 	for p, n := range f.Replicas {
 		if n < 0 || n > 50 {
