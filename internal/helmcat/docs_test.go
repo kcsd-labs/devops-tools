@@ -160,3 +160,39 @@ func TestApplyFillMore(t *testing.T) {
 		}
 	}
 }
+
+// Airflow keeps one ingress block per part under ingress, hosts as
+// {name, tls}; its metrics' blocks are not offered.
+func TestDetectAirflowIngress(t *testing.T) {
+	s := Detect(values(t, `
+ingress:
+  enabled: ~
+  apiServer:
+    enabled: false
+    path: "/"
+    host: ""
+    hosts: []
+    ingressClassName: ""
+    tls: {enabled: false, secretName: ""}
+  statsd:
+    enabled: false
+    path: "/metrics"
+    host: ""
+    hosts: []
+    ingressClassName: ""
+`))
+	if len(s.Ingresses) != 1 || s.Ingresses[0] != (IngressSpot{Path: "ingress.apiServer", Shape: "namedhosts", ClassKey: "ingressClassName"}) {
+		t.Fatalf("ingresses = %+v", s.Ingresses)
+	}
+	out, _, err := ApplyFill("", Fill{Ingress: &IngressFill{IngressSpot: s.Ingresses[0], Host: "airflow.dev.example.com",
+		Class: "nginx", TLS: "wildcard"}}, Fill{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := values(t, out)["ingress"].(map[string]any)["apiServer"].(map[string]any)
+	host := api["hosts"].([]any)[0].(map[string]any)
+	if api["enabled"] != true || api["ingressClassName"] != "nginx" || host["name"] != "airflow.dev.example.com" ||
+		host["tls"].(map[string]any)["secretName"] != "wildcard" {
+		t.Errorf("airflow ingress:\n%s", out)
+	}
+}

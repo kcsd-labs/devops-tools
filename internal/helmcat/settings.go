@@ -42,7 +42,8 @@ type IngressSpot struct {
 	// Shape is how the block names a host: "hostname" (Bitnami, Argo CD:
 	// hostname, extraTls), "hosts" (helm create: hosts[].host with paths,
 	// tls[]), "hostlist" (Grafana, Prometheus: hosts is a list of names,
-	// with the path beside it) or "domain" (GitLab: one domain under
+	// with the path beside it), "namedhosts" (Airflow: hosts are
+	// {name, tls}) or "domain" (GitLab: one domain under
 	// global.hosts, each part of the chart a name in it).
 	Shape string `json:"shape"`
 	// ClassKey is the key the class goes under: ingressClassName or className.
@@ -119,6 +120,22 @@ func Detect(values map[string]any) Settings {
 					s.Ingresses = append(s.Ingresses, spot)
 					continue
 				}
+				// Airflow's: one block per part of the chart under ingress —
+				// ingress.apiServer, ingress.web — and helpers' own beside.
+				found := false
+				for part, v := range sub {
+					block, isMap := v.(map[string]any)
+					if !isMap || ingressHelperRE.MatchString(part) {
+						continue
+					}
+					if spot, ok := ingressSpot(path+"."+part, block); ok {
+						s.Ingresses = append(s.Ingresses, spot)
+						found = true
+					}
+				}
+				if found {
+					continue
+				}
 			}
 			if depth < maxDepth {
 				walk(path, sub, depth+1)
@@ -147,6 +164,9 @@ func Detect(values map[string]any) Settings {
 	s.Replicas = shallowFirst(s.Replicas, 6)
 	return s
 }
+
+// ingressHelperRE names ingress blocks for a chart's metrics, not its users.
+var ingressHelperRE = regexp.MustCompile(`(?i)(statsd|pgbouncer|metrics|exporter|prometheus)`)
 
 // helperRE names the parts of a chart that only help its workloads run.
 var helperRE = regexp.MustCompile(`(?i)(metrics|exporter|volumePermissions|sysctl|init|job|backup|sidecar|tls|auth)`)
@@ -193,7 +213,12 @@ func ingressSpot(path string, m map[string]any) (IngressSpot, bool) {
 		return IngressSpot{}, false
 	}
 	spot := IngressSpot{Path: path}
+	_, tlsBlock := m["tls"].(map[string]any)
 	switch {
+	case has(m, "host") && has(m, "hosts") && tlsBlock:
+		// Airflow: hosts are {name, tls: {enabled, secretName}}, the class
+		// beside them.
+		spot.Shape, spot.ClassKey = "namedhosts", "ingressClassName"
 	case has(m, "hostname"):
 		spot.Shape, spot.ClassKey = "hostname", "ingressClassName"
 	case has(m, "hosts"):
@@ -388,6 +413,12 @@ func (in *IngressFill) assignments() (map[string]assign, error) {
 		if in.TLS != "" {
 			block["tls"] = tls
 		}
+	case "namedhosts":
+		host := map[string]any{"name": in.Host}
+		if in.TLS != "" {
+			host["tls"] = map[string]any{"enabled": true, "secretName": in.TLS}
+		}
+		block["hosts"] = []any{host}
 	default:
 		return nil, fmt.Errorf("unknown ingress shape %q", in.Shape)
 	}
