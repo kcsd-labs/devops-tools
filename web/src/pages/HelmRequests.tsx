@@ -212,6 +212,15 @@ function Review({
           </button>
         </div>
         <div className="modal-body pad">
+          {q.help && (
+            <div className="cat-help">
+              <div className="cat-q">{q.requester} asks for help</div>
+              <div className="cat-help-note">“{q.help}”</div>
+              <div className="cat-why">
+                The values below do not pass the check yet. Finish them — the check runs as you type — then approve.
+              </div>
+            </div>
+          )}
           {q.newNamespace && (
             <div className="cat-grant">
               <div className="cat-q">
@@ -272,7 +281,7 @@ function Review({
               </>
             )}
           </div>
-          <CodeMirror value={values} theme={theme} height="240px" extensions={[yaml()]} onChange={setValues} />
+          <CodeMirror value={values} theme={theme} height={q.help ? "360px" : "240px"} extensions={[yaml()]} onChange={setValues} />
           <CheckResult check={check} checking={checking} error={checkError} upgrade={q.kind === "upgrade"} />
           {check?.ok && check.notes && (
             <div className="cat-review-notes">

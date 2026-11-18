@@ -135,7 +135,7 @@ export function until(iso: string): string {
 export function requestLine(r: HelmRequest): string {
   const what =
     r.kind === "upgrade" ? `upgrade · ${r.chart} ${r.fromVersion ?? "?"} → ${r.version}` : `install · ${r.chart} ${r.version}`;
-  return `${what} · ${r.repo}${r.newNamespace ? " · into a new namespace" : ""}`;
+  return `${what} · ${r.repo}${r.newNamespace ? " · into a new namespace" : ""}${r.help ? " · asks for help" : ""}`;
 }
 
 export function requestNote(r: HelmRequest): string {

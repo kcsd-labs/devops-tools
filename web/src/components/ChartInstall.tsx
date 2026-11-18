@@ -252,12 +252,12 @@ export function ChartInstall(props: InstallProps) {
 
   const ready = !!check?.ok && checkedKey === key && !checking && !busy;
 
-  const submit = async () => {
+  const submit = async (help = "") => {
     if (!ask) return;
     setBusy(true);
     setSubmitError("");
     try {
-      const q = await api.catalogRequest(target, ask);
+      const q = await api.catalogRequest(target, help ? { ...ask, help } : ask);
       if (!isNew) remember(NAMESPACE_KEY, target);
       props.onDone(q);
     } catch (e: any) {
@@ -269,6 +269,34 @@ export function ChartInstall(props: InstallProps) {
   };
 
   const verb = kind === "upgrade" ? "Upgrade" : "Install";
+
+  // Values as files: the chart's defaults to read or edit elsewhere, and
+  // values written elsewhere brought back.
+  const fileBase = `${release || chart}-${version || "values"}`;
+  const upload = useRef<HTMLInputElement>(null);
+  const [copied, setCopied] = useState("");
+  const copy = async (what: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied(""), 1500);
+    } catch {
+      setCopied("");
+    }
+  };
+  const readUpload = async (file?: File) => {
+    if (!file) return;
+    const text = await file.text();
+    if (values.trim() && !window.confirm(`Replace your values with ${file.name}?`)) return;
+    setValues(text);
+    setFormKey((k) => k + 1);
+  };
+
+  // A developer stuck on values that do not pass can hand them to an
+  // administrator, saying what is missing.
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpNote, setHelpNote] = useState("");
+  const mayAskHelp = !direct && !!check && !check.ok && checkedKey === key && !checking;
 
   // What the questions on the left wrote, lit up in the editor for a moment.
   const viewRef = useRef<EditorView | null>(null);
@@ -519,6 +547,48 @@ export function ChartInstall(props: InstallProps) {
                         {release} in {target} · {version}
                       </span>
                     )}
+                    {(tab === "values" || tab === "defaults") && (
+                      <div className="cat-filebar">
+                        {tab === "values" && (
+                          <>
+                            <button
+                              className="btn ghost sm"
+                              onClick={() => upload.current?.click()}
+                              title="Load values from a file — the ones you edited elsewhere"
+                            >
+                              ⇪ Upload
+                            </button>
+                            <input
+                              ref={upload}
+                              type="file"
+                              accept=".yaml,.yml,.txt"
+                              hidden
+                              onChange={(e) => {
+                                void readUpload(e.target.files?.[0]);
+                                e.target.value = "";
+                              }}
+                            />
+                          </>
+                        )}
+                        <button
+                          className="btn ghost sm"
+                          onClick={() =>
+                            tab === "values"
+                              ? download(`${fileBase}-values.yaml`, values)
+                              : download(`${chart}-${version}-defaults.yaml`, info.defaults)
+                          }
+                          title={tab === "values" ? "Save your values as a file" : "Save the chart's values.yaml, to read or edit elsewhere"}
+                        >
+                          ⇩ Download
+                        </button>
+                        <button
+                          className="btn ghost sm"
+                          onClick={() => copy(tab, tab === "values" ? values : info.defaults)}
+                        >
+                          {copied === tab ? "✓ Copied" : "Copy all"}
+                        </button>
+                      </div>
+                    )}
                     <button
                       className="btn ghost sm cat-expand"
                       onClick={() => setExpanded((x) => !x)}
@@ -556,7 +626,7 @@ export function ChartInstall(props: InstallProps) {
                         theme={theme}
                         height="100%"
                         extensions={[yaml(), EditorView.lineWrapping, keyDocs(docs)]}
-                        editable={false}
+                        readOnly
                       />
                     </div>
                   )}
@@ -582,6 +652,31 @@ export function ChartInstall(props: InstallProps) {
           </div>
         )}
         {submitError && <div className="alert cat-submit-error">{submitError}</div>}
+        {helpOpen && mayAskHelp && (
+          <div className="cat-help">
+            <div className="cat-q">Ask an administrator to finish it</div>
+            <div className="cat-why">
+              The request goes with your values as they are. Say what you could not fill in — an administrator completes
+              the values, checks them and installs.
+            </div>
+            <textarea
+              className="input"
+              rows={3}
+              autoFocus
+              value={helpNote}
+              placeholder="e.g. I don't know which database to use, or where the DAGs are"
+              onChange={(e) => setHelpNote(e.target.value)}
+            />
+            <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn ghost sm" onClick={() => setHelpOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn sm" disabled={!helpNote.trim() || busy} onClick={() => submit(helpNote.trim())}>
+                {busy ? "Sending…" : "Send to an administrator"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="modal-actions cat-foot">
           <CheckLine
@@ -600,9 +695,15 @@ export function ChartInstall(props: InstallProps) {
           <button className="btn ghost" onClick={props.onClose}>
             Cancel
           </button>
-          <button className="btn" disabled={!ready} onClick={submit}>
-            {busy ? "Sending…" : direct ? verb : "Need approve"}
-          </button>
+          {mayAskHelp && !helpOpen ? (
+            <button className="btn" onClick={() => setHelpOpen(true)} title="The values do not pass yet: an administrator can finish them">
+              Ask an admin to help
+            </button>
+          ) : (
+            <button className="btn" disabled={!ready} onClick={() => submit()}>
+              {busy ? "Sending…" : direct ? verb : "Need approve"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -639,7 +740,7 @@ function SimpleSide({
               value={values}
               theme={theme}
               height="100%"
-              editable={false}
+              readOnly
               extensions={[yaml(), flashField, EditorView.lineWrapping, ...help]}
               onCreateEditor={onEditor}
             />
@@ -1174,6 +1275,16 @@ function ChartNeeds({
       })}
     </div>
   );
+}
+
+/** Saves text as a file in the browser. */
+function download(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/yaml" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // Bitnami's presets, by what each lets a pod use at most.

@@ -68,6 +68,9 @@ type Request struct {
 	GrantedRoles []string `json:"grantedRoles,omitempty"`
 	// Notes are what the chart says comes after the install: its NOTES.txt.
 	Notes string `json:"notes,omitempty"`
+	// Help is what the requester could not fill in and asks an
+	// administrator to: the values need not pass the check yet.
+	Help string `json:"help,omitempty"`
 
 	Requester string     `json:"requester"`
 	Created   time.Time  `json:"created"`

@@ -155,6 +155,8 @@ export interface CatalogAsk {
   newNamespace?: boolean;
   /** Required values the form already has fields for: nothing to search for. */
   known?: string[];
+  /** Asks an administrator to finish values that do not pass yet. */
+  help?: string;
 }
 
 export interface HelmRequest {
@@ -181,6 +183,8 @@ export interface HelmRequest {
   detail?: string;
   /** The namespace is created on approval. */
   newNamespace?: boolean;
+  /** What the requester could not fill in, for the administrator. */
+  help?: string;
   grantedRoles?: string[];
   notes?: string;
 }

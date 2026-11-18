@@ -406,6 +406,33 @@ func TestRequestIntoANewNamespace(t *testing.T) {
 	}
 }
 
+// Values that do not pass go to an administrator only as a request for help;
+// approving still needs them to pass.
+func TestRequestForHelp(t *testing.T) {
+	f := newCatalogFixture(t)
+	bad := ask("cache", "bad: true\n")
+	if code, _ := f.call(t, "anna", "POST", reqs, bad); code != http.StatusUnprocessableEntity {
+		t.Errorf("failing values without asking for help: %d", code)
+	}
+	withHelp := map[string]any{"kind": "install", "release": "cache", "repo": "bitnami", "chart": "redis",
+		"version": "21.2.3", "values": "bad: true\n", "help": "I don't know what the cluster role should be"}
+	code, q := f.call(t, "anna", "POST", reqs, withHelp)
+	if code != http.StatusCreated || q["status"] != helmreq.StatusWaiting || q["help"] == "" {
+		t.Fatalf("help request: %d %v", code, q)
+	}
+	if code, _ := f.call(t, "root", "POST", reqs, withHelp); code != http.StatusUnprocessableEntity {
+		t.Errorf("an administrator installs directly, so passing values or nothing: %d", code)
+	}
+	id := q["id"].(string)
+	if code, _ := f.call(t, "root", "POST", "/api/helm/requests/"+id+"/approve", map[string]any{}); code != http.StatusUnprocessableEntity {
+		t.Errorf("approving values that still fail: %d", code)
+	}
+	if code, out := f.call(t, "root", "POST", "/api/helm/requests/"+id+"/approve", map[string]any{"values": "fixed: true\n"}); code != http.StatusOK {
+		t.Fatalf("approving with the values finished: %d %v", code, out)
+	}
+	f.waitInstall(t)
+}
+
 func TestStartingValues(t *testing.T) {
 	f := newCatalogFixture(t)
 	path := "/api/helm/templates/bitnami/redis"

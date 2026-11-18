@@ -436,6 +436,9 @@ type catalogAsk struct {
 	NewNamespace bool `json:"newNamespace"`
 	// Known are the required values the form already has fields for.
 	Known []string `json:"known,omitempty"`
+	// Help asks an administrator to finish values that do not pass yet,
+	// saying what is missing.
+	Help string `json:"help,omitempty"`
 }
 
 // checkResult is a plan, with what the registries said about its images.
@@ -635,7 +638,14 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		catalogError(w, err)
 		return
 	}
-	if !res.OK {
+	direct := s.isApprover(user.Roles)
+	help := strings.TrimSpace(ask.Help)
+	if len(help) > 2000 {
+		help = help[:2000]
+	}
+	// Values that do not pass go only to an administrator, as a request for
+	// help; what is installed still passes the check on approval.
+	if !res.OK && (help == "" || direct) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "the check did not pass", "check": res})
 		return
 	}
@@ -655,7 +665,9 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		Requester: user.Username, Created: now, Expires: now.Add(s.cfg.Catalog.RequestTTL),
 		Status: helmreq.StatusWaiting, NewNamespace: ask.NewNamespace, Notes: res.Notes,
 	}
-	direct := s.isApprover(user.Roles)
+	if !res.OK {
+		req.Help = help
+	}
 	if direct {
 		req.Status, req.Decider, req.Decided = helmreq.StatusInstalling, user.Username, &now
 	}
@@ -700,6 +712,9 @@ func requestDetail(q *helmreq.Request, vals map[string]any) string {
 	}
 	if q.NewNamespace {
 		d += "; new namespace"
+	}
+	if q.Help != "" {
+		d += "; asks for help"
 	}
 	return d
 }

@@ -3580,3 +3580,33 @@ a.seg-btn {
   gap: 6px;
   font-size: 12px;
 }
+.cat-filebar {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.cat-filebar + .cat-expand {
+  margin-left: 0;
+}
+.cat-help {
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 8px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal-body .cat-help {
+  margin: 0 0 14px;
+}
+.cat-help textarea {
+  resize: vertical;
+}
+.cat-help-note {
+  font-size: 13px;
+  font-style: italic;
+  white-space: pre-wrap;
+}
