@@ -31,7 +31,9 @@ export function ChartDetails({
     };
   }, [api, pkg.repo, pkg.name]);
 
-  const p = info ?? pkg;
+  // Artifact Hub gives the stars with a search, not with one chart: the ones
+  // from the list stay.
+  const p = info ? { ...info, stars: info.stars || pkg.stars } : pkg;
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal cat-details" onClick={(e) => e.stopPropagation()}>
