@@ -37,6 +37,19 @@ func DetectChart(ch *chart.Chart) Settings {
 	s := detect(merged, ownGlobalStorage(ch.Values))
 	s.Parts = parts
 	s.Components = components(merged, ChartDocs(ch), every, conds)
+	// A login a Git block takes only in its commented example.
+	examples := ChartExamples(ch)
+	for i, g := range s.GitSources {
+		if g.CredentialsKey != "" {
+			continue
+		}
+		for _, k := range []string{"credentialsSecret", "existingSecret", "secretName", "sshKeySecret"} {
+			if _, ok := examples[g.Path+"."+k]; ok {
+				s.GitSources[i].CredentialsKey = k
+				break
+			}
+		}
+	}
 	return s
 }
 

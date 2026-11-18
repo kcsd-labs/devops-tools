@@ -71,6 +71,9 @@ type Request struct {
 	// Help is what the requester could not fill in and asks an
 	// administrator to: the values need not pass the check yet.
 	Help string `json:"help,omitempty"`
+	// Secrets are created in the namespace before the chart is installed:
+	// a login a chart takes by the Secret's name.
+	Secrets []NewSecret `json:"secrets,omitempty"`
 
 	Requester string     `json:"requester"`
 	Created   time.Time  `json:"created"`
@@ -81,6 +84,33 @@ type Request struct {
 	Comment   string     `json:"comment,omitempty"`
 	// Detail is how an install ended: what failed, or nothing.
 	Detail string `json:"detail,omitempty"`
+}
+
+// NewSecret is a Secret to create with a release. Data is kept with the
+// request — itself a Secret — and never shown: Keys is what is.
+type NewSecret struct {
+	Name string            `json:"name"`
+	Data map[string]string `json:"data,omitempty"`
+	Keys []string          `json:"keys,omitempty"`
+}
+
+// Redacted is the request as it is shown: the Secrets to create by name and
+// keys, without what they hold.
+func (r *Request) Redacted() *Request {
+	if len(r.Secrets) == 0 {
+		return r
+	}
+	c := *r
+	c.Secrets = make([]NewSecret, len(r.Secrets))
+	for i, s := range r.Secrets {
+		keys := make([]string, 0, len(s.Data))
+		for k := range s.Data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		c.Secrets[i] = NewSecret{Name: s.Name, Keys: keys}
+	}
+	return &c
 }
 
 // Open reports whether the request still waits for an answer.

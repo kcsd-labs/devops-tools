@@ -93,6 +93,17 @@ export interface CatalogSettings {
   replicas: string[];
   /** The chart's own value at each of the paths above. */
   defaults: Record<string, string>;
+  /** Passwords; several sharing a default are set together. */
+  passwords?: { paths: string[]; default: string }[];
+  /** Blocks loading content from Git. */
+  gitSources?: {
+    path: string;
+    repoKey: string;
+    branchKeys: string[];
+    folderKey?: string;
+    credentialsKey?: string;
+    gitSync?: boolean;
+  }[];
   /** Parts and features switched on or off. */
   components?: { key: string; on: boolean; about: string; part?: boolean }[];
   /** Built-in parts (subcharts) by what each says it is. */
@@ -119,6 +130,19 @@ export interface ValuesFill {
   diskPaths?: string[];
   /** Sizes volume by volume. */
   diskSizes?: Record<string, string>;
+  passwords?: Record<string, string>;
+  git?: {
+    path: string;
+    repoKey: string;
+    branchKeys: string[];
+    folderKey?: string;
+    credentialsKey?: string;
+    gitSync?: boolean;
+    repo: string;
+    branch: string;
+    folder: string;
+    credentials: string;
+  };
   replicas?: Record<string, number>;
   /** Values typed for keys the chart asked for. */
   set?: Record<string, string>;
@@ -163,6 +187,8 @@ export interface CatalogAsk {
   known?: string[];
   /** Asks an administrator to finish values that do not pass yet. */
   help?: string;
+  /** Secrets created in the namespace just before the install. */
+  secrets?: { name: string; data: Record<string, string> }[];
 }
 
 export interface HelmRequest {
@@ -191,6 +217,8 @@ export interface HelmRequest {
   newNamespace?: boolean;
   /** What the requester could not fill in, for the administrator. */
   help?: string;
+  /** Secrets made with the release: names and keys only. */
+  secrets?: { name: string; keys?: string[] }[];
   grantedRoles?: string[];
   notes?: string;
 }

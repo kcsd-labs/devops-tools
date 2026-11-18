@@ -104,3 +104,58 @@ func TestDiskSizesEach(t *testing.T) {
 		t.Error("a size that is not one")
 	}
 }
+
+func TestPasswordsAndGit(t *testing.T) {
+	s := Detect(values(t, `
+createUserJob:
+  defaultUser:
+    username: admin
+    password: admin
+data:
+  metadataConnection:
+    user: postgres
+    pass: postgres
+postgresql:
+  auth:
+    postgresPassword: postgres
+    username: ""
+    password: ""
+redis:
+  password: ~
+dags:
+  gitSync:
+    enabled: false
+    repo: https://github.com/apache/airflow.git
+    branch: v2-2-stable
+    ref: v2-2-stable
+    subPath: "tests/dags"
+`))
+	got := map[string][]string{}
+	for _, p := range s.Passwords {
+		got[p.Default] = p.Paths
+	}
+	if strings.Join(got["postgres"], ",") != "data.metadataConnection.pass,postgresql.auth.postgresPassword" {
+		t.Errorf("the database's password, told twice, goes together: %+v", s.Passwords)
+	}
+	if strings.Join(got["admin"], ",") != "createUserJob.defaultUser.password" || strings.Join(got[""], ",") != "redis.password" {
+		t.Errorf("passwords %+v (postgresql.auth.password has no user and is not asked)", s.Passwords)
+	}
+	if len(s.GitSources) != 1 || s.GitSources[0].Path != "dags.gitSync" || !s.GitSources[0].GitSync ||
+		strings.Join(s.GitSources[0].BranchKeys, ",") != "branch,ref" || s.GitSources[0].FolderKey != "subPath" {
+		t.Fatalf("git %+v", s.GitSources)
+	}
+	g := s.GitSources[0]
+	g.CredentialsKey = "credentialsSecret"
+	out, _, err := ApplyFill("", Fill{Git: &GitFill{GitSpot: g, Repo: "https://git.example.com/team/dags.git", Branch: "main",
+		Credentials: "app-git"}, Passwords: map[string]string{"redis.password": "s3cret"}}, Fill{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := values(t, out)["dags"].(map[string]any)["gitSync"].(map[string]any)
+	if gs["enabled"] != true || gs["ref"] != "main" || gs["branch"] != "main" || gs["subPath"] != "" || gs["credentialsSecret"] != "app-git" {
+		t.Errorf("git:\n%s", out)
+	}
+	if !strings.Contains(out, "password: s3cret # password, from the install form") {
+		t.Errorf("password:\n%s", out)
+	}
+}

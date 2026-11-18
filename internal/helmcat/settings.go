@@ -33,10 +33,80 @@ type Settings struct {
 	Replicas []string `json:"replicas"`
 	// Defaults are the chart's own values at the paths above, as text.
 	Defaults map[string]string `json:"defaults"`
+	// Passwords are the chart's passwords, those sharing a default — most
+	// likely one password told to two parts — grouped to be set together.
+	Passwords []PasswordSpot `json:"passwords"`
+	// GitSources are blocks that load content from a Git repository.
+	GitSources []GitSpot `json:"gitSources"`
 	// Components are the parts and features switched on or off.
 	Components []Component `json:"components"`
 	// Parts are the subcharts included, each by what it says it is.
 	Parts map[string]string `json:"parts"`
+}
+
+// PasswordSpot is a password of the chart: one setting, or several that
+// share their default and are set together.
+type PasswordSpot struct {
+	Paths []string `json:"paths"`
+	// Default is what the chart ships; empty when it makes one up.
+	Default string `json:"default"`
+}
+
+// GitSpot is a block loading content from Git — git-sync's gitSync, a
+// chart's own git — with the keys it takes.
+type GitSpot struct {
+	Path       string   `json:"path"`
+	RepoKey    string   `json:"repoKey"`
+	BranchKeys []string `json:"branchKeys"`
+	FolderKey  string   `json:"folderKey,omitempty"`
+	// CredentialsKey names a Secret holding a login, when the block takes one.
+	CredentialsKey string `json:"credentialsKey,omitempty"`
+	// GitSync: the kubernetes git-sync sidecar, whose login is
+	// GITSYNC_USERNAME and GITSYNC_PASSWORD (GIT_SYNC_… before v4).
+	GitSync bool `json:"gitSync,omitempty"`
+}
+
+var (
+	passwordKeyRE = regexp.MustCompile(`^(password|pass|[a-z][A-Za-z]*Password)$`)
+	// Helpers' own passwords — metrics, replication — are not asked.
+	helperPasswordRE = regexp.MustCompile(`(?i)^(metrics|replication|exporter|stats)`)
+	gitBlockRE       = regexp.MustCompile(`(?i)^(gitSync|git|gitRepo|gitSource|repository)$`)
+)
+
+// gitSpot reads a block as a Git source, or not.
+func gitSpot(path, key string, m map[string]any) (GitSpot, bool) {
+	if !gitBlockRE.MatchString(key) || has(m, "tag") || has(m, "pullPolicy") {
+		// An image of git-sync, not a repository to load.
+		return GitSpot{}, false
+	}
+	g := GitSpot{Path: path, GitSync: strings.EqualFold(key, "gitSync")}
+	for _, k := range []string{"repo", "repository", "url"} {
+		if v, ok := m[k]; ok && !isMap(v) {
+			g.RepoKey = k
+			break
+		}
+	}
+	if g.RepoKey == "" {
+		return GitSpot{}, false
+	}
+	for _, k := range []string{"branch", "ref"} {
+		if has(m, k) {
+			g.BranchKeys = append(g.BranchKeys, k)
+		}
+	}
+	for _, k := range []string{"subPath", "path", "dir"} {
+		if v, ok := m[k]; ok && !isMap(v) {
+			g.FolderKey = k
+			break
+		}
+	}
+	for _, k := range []string{"credentialsSecret", "existingSecret", "secretName", "sshKeySecret"} {
+		if has(m, k) {
+			g.CredentialsKey = k
+			break
+		}
+	}
+	return g, true
 }
 
 // IngressSpot is one ingress block in a chart's values.
@@ -91,6 +161,7 @@ func detect(values map[string]any, ownGlobal bool) Settings {
 	}
 	// Each volume's own setting, used when there is no global one.
 	var local []string
+	var passwords []string
 	var walk func(prefix string, m map[string]any, depth int)
 	walk = func(prefix string, m map[string]any, depth int) {
 		parent := prefix[strings.LastIndex(prefix, ".")+1:]
@@ -122,9 +193,19 @@ func detect(values map[string]any, ownGlobal bool) Settings {
 				s.Replicas = append(s.Replicas, path)
 				s.Defaults[path] = text(v)
 				continue
+			case passwordKeyRE.MatchString(k) && (v == nil || isString(v)) && !((k == "password" || k == "pass") && unusedLogin(m)) &&
+				!helperPasswordRE.MatchString(k):
+				passwords = append(passwords, path)
+				s.Defaults[path] = text(v)
+				continue
 			}
 			sub, ok := v.(map[string]any)
 			if !ok {
+				continue
+			}
+			if g, ok := gitSpot(path, k, sub); ok {
+				// Off by default — that is the question.
+				s.GitSources = append(s.GitSources, g)
 				continue
 			}
 			if on, isSwitch := sub["enabled"].(bool); isSwitch && !on && k != "ingress" {
@@ -183,7 +264,45 @@ func detect(values map[string]any, ownGlobal bool) Settings {
 	s.Presets = shallowFirst(s.Presets, 8)
 	s.Disks = shallowFirst(s.Disks, 8)
 	s.Replicas = shallowFirst(s.Replicas, 6)
+	s.Passwords = groupPasswords(shallowFirst(passwords, 10), s.Defaults)
+	sort.SliceStable(s.GitSources, func(i, j int) bool {
+		return strings.Count(s.GitSources[i].Path, ".") < strings.Count(s.GitSources[j].Path, ".") ||
+			(strings.Count(s.GitSources[i].Path, ".") == strings.Count(s.GitSources[j].Path, ".") && s.GitSources[i].Path < s.GitSources[j].Path)
+	})
 	return s
+}
+
+// unusedLogin: a password beside a user name left empty — a login the chart
+// creates only when asked, as Bitnami's auth.username and auth.password.
+func unusedLogin(m map[string]any) bool {
+	for _, k := range []string{"username", "user"} {
+		if v, ok := m[k]; ok && (v == nil || v == "") {
+			return true
+		}
+	}
+	return false
+}
+
+// groupPasswords puts together the passwords that ship the same value: a
+// chart telling its database's password to the part that connects to it
+// says it twice, and the two must change together.
+func groupPasswords(paths []string, defaults map[string]string) []PasswordSpot {
+	out := []PasswordSpot{}
+	at := map[string]int{}
+	for _, p := range paths {
+		d := defaults[p]
+		if d != "" {
+			if i, ok := at[d]; ok {
+				out[i].Paths = append(out[i].Paths, p)
+				continue
+			}
+			at[d] = len(out)
+		} else {
+			d = ""
+		}
+		out = append(out, PasswordSpot{Paths: []string{p}, Default: d})
+	}
+	return out
 }
 
 // ingressHelperRE names ingress blocks for a chart's metrics, not its users.
@@ -220,6 +339,8 @@ func isNumber(v any) bool {
 
 func text(v any) string {
 	switch t := v.(type) {
+	case nil:
+		return ""
 	case string:
 		return t
 	case float64:
@@ -294,6 +415,19 @@ type Fill struct {
 	// Extra are values typed for settings the chart takes but does not ask
 	// for — a user name beside a host it does ask for.
 	Extra map[string]string `json:"extra"`
+	// Passwords are passwords by path, written as text.
+	Passwords map[string]string `json:"passwords"`
+	// Git loads content from a repository.
+	Git *GitFill `json:"git"`
+}
+
+// GitFill is a Git source to switch on.
+type GitFill struct {
+	GitSpot
+	Repo        string `json:"repo"`
+	Branch      string `json:"branch"`
+	Folder      string `json:"folder"`
+	Credentials string `json:"credentials"`
 }
 
 // IngressFill is an ingress to switch on in one block.
@@ -327,6 +461,8 @@ const (
 	noteReplicas = "replicas, from the install form"
 	noteRequired = "the chart asks for this"
 	noteExtra    = "from the install form"
+	notePassword = "password, from the install form"
+	noteGit      = "loads from Git, from the install form"
 )
 
 // assignments are the keys a fill sets, each with its value.
@@ -374,6 +510,31 @@ func (f Fill) assignments() (map[string]assign, error) {
 			continue
 		}
 		out[p] = assign{scalar(raw), noteRequired}
+	}
+	for p, pw := range f.Passwords {
+		if pw != "" {
+			out[p] = assign{pw, notePassword}
+		}
+	}
+	if g := f.Git; g != nil {
+		if strings.TrimSpace(g.Repo) == "" {
+			return nil, fmt.Errorf("the repository needs an address")
+		}
+		out[g.Path+".enabled"] = assign{true, noteGit}
+		out[g.Path+"."+g.RepoKey] = assign{strings.TrimSpace(g.Repo), ""}
+		for _, k := range g.BranchKeys {
+			if b := strings.TrimSpace(g.Branch); b != "" {
+				out[g.Path+"."+k] = assign{b, ""}
+			}
+		}
+		if g.FolderKey != "" {
+			// Written even when empty: the chart's own example folder is not
+			// the repository's.
+			out[g.Path+"."+g.FolderKey] = assign{strings.Trim(strings.TrimSpace(g.Folder), "/"), ""}
+		}
+		if g.CredentialsKey != "" && g.Credentials != "" {
+			out[g.Path+"."+g.CredentialsKey] = assign{g.Credentials, ""}
+		}
 	}
 	for p, raw := range f.Extra {
 		raw = strings.TrimSpace(raw)

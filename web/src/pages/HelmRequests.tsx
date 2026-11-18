@@ -270,6 +270,13 @@ function Review({
               )}
             </div>
           )}
+          {q.secrets && q.secrets.length > 0 && (
+            <div className="field-hint cat-review-secrets">
+              Creates {q.secrets.length === 1 ? "a Secret" : "Secrets"} before the install:{" "}
+              {q.secrets.map((x) => `${x.name} (${(x.keys ?? []).join(", ")})`).join("; ")} — values typed by {q.requester},
+              not shown.
+            </div>
+          )}
           <div className="field-hint">
             Values on top of the chart's defaults. Change them if you need to — the developer sees what you changed.
             {changed && (

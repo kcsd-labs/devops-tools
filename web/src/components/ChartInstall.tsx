@@ -122,6 +122,10 @@ export function ChartInstall(props: InstallProps) {
   const [formKey, setFormKey] = useState(0);
   // Every key the chart asked for, kept once asked so the field stays.
   const [asked, setAsked] = useState<{ key: string; said: string }[]>([]);
+  // Secrets to create with the release: a login a chart takes by name.
+  const [newSecrets, setNewSecrets] = useState<NewSecret[]>([]);
+  const addSecret = (sec: NewSecret) => setNewSecrets((cur) => [...cur.filter((x) => x.name !== sec.name), sec]);
+  const dropSecret = (name: string) => setNewSecrets((cur) => cur.filter((x) => x.name !== name));
   const askedRef = useRef(asked);
   askedRef.current = asked;
 
@@ -203,9 +207,9 @@ export function ChartInstall(props: InstallProps) {
   const ask: CatalogAsk | null = useMemo(
     () =>
       info && version && release && target && !namespaceProblem && (!isNew || newName === settledNew)
-        ? { kind, release, repo, chart, version, values, newNamespace: isNew }
+        ? { kind, release, repo, chart, version, values, newNamespace: isNew, secrets: newSecrets.length ? newSecrets : undefined }
         : null,
-    [info, version, release, target, namespaceProblem, isNew, newName, settledNew, kind, repo, chart, values]
+    [info, version, release, target, namespaceProblem, isNew, newName, settledNew, kind, repo, chart, values, newSecrets]
   );
   const key = ask ? JSON.stringify({ ...ask, target }) : "";
 
@@ -500,6 +504,9 @@ export function ChartInstall(props: InstallProps) {
                 asked={asked}
                 stillAsked={stillAsked}
                 refusal={check && !check.ok ? check.refusal : undefined}
+                newSecrets={newSecrets}
+                onAddSecret={addSecret}
+                onDropSecret={dropSecret}
               />
 
               {direct && kind === "install" && (
@@ -782,6 +789,9 @@ function InstallForm({
   asked,
   stillAsked,
   refusal,
+  newSecrets,
+  onAddSecret,
+  onDropSecret,
 }: {
   info: CatalogChart;
   hints?: ClusterHints;
@@ -794,9 +804,23 @@ function InstallForm({
   asked: { key: string; said: string }[];
   stillAsked: Set<string>;
   refusal?: { where?: string; messages: string[] };
+  newSecrets: NewSecret[];
+  onAddSecret: (s: NewSecret) => void;
+  onDropSecret: (name: string) => void;
 }) {
   const api = useApi();
   const settings = info.settings;
+  // The namespace's Secrets and those made with the release, for the fields
+  // that take a Secret's name.
+  const allSecrets = [
+    ...(hints?.secrets ?? []),
+    ...newSecrets.map((x) => ({ name: x.name, keys: Object.keys(x.data), fresh: true })),
+  ];
+  const [passwords, setPasswords] = useState<Record<number, string>>({});
+  const [shown, setShown] = useState<Record<number, boolean>>({});
+  const [git, setGit] = useState<{ on: boolean; repo: string; branch: string; folder: string; access: string; user: string; pass: string }>({
+    on: false, repo: "", branch: "main", folder: "", access: "", user: "", pass: "",
+  });
   const docs = info.docs;
   const install = kind === "install";
   const defaultClass = hints?.storageClasses.find((c) => c.default)?.name ?? "";
@@ -841,6 +865,22 @@ function InstallForm({
   for (const [k, v] of Object.entries(typed)) if (v.trim()) set[k] = v;
   const more: Record<string, string> = {};
   for (const [k, v] of Object.entries(extra)) if (v.trim() && !set[k]) more[k] = v;
+  const passwordFill: Record<string, string> = {};
+  (settings.passwords ?? []).forEach((pw, i) => {
+    if (passwords[i]) for (const p of pw.paths) passwordFill[p] = passwords[i];
+  });
+  const gs = (settings.gitSources ?? [])[0];
+  const gitSecretName = `${release || info.name}-git`;
+  const gitFill =
+    gs && git.on && git.repo.trim()
+      ? {
+          ...gs,
+          repo: git.repo,
+          branch: git.branch,
+          folder: git.folder,
+          credentials: git.access === NEW_LOGIN ? gitSecretName : git.access,
+        }
+      : undefined;
   const sizeOK = (v: string) => /^[0-9]+(\.[0-9]+)?(Mi|Gi|Ti)$/.test(v);
   const diskSizes: Record<string, string> = {};
   for (const [p, v] of Object.entries(disks)) if (sizeOK(v)) diskSizes[p] = v;
@@ -854,6 +894,8 @@ function InstallForm({
         storageClass: storage,
         storagePaths: settings.storage,
         diskSizes,
+        passwords: passwordFill,
+        git: gitFill,
         preset,
         presetPaths: settings.presets,
         replicas: replicaCounts,
@@ -913,13 +955,27 @@ function InstallForm({
     ) : null;
   const keptOf = (paths: string[]) => kept.filter((k) => paths.includes(k));
 
+  // A login typed for the repository becomes a Secret made with the release.
+  const gitLoginKey = gs ? JSON.stringify([git.on, git.access, git.user, git.pass, gitSecretName]) : "";
+  useEffect(() => {
+    if (!gs) return;
+    if (git.on && git.access === NEW_LOGIN && git.user && git.pass) {
+      onAddSecret({ name: gitSecretName, data: gitLogin(gs.gitSync ?? false, git.user, git.pass) });
+    } else {
+      onDropSecret(gitSecretName);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gitLoginKey]);
+
   const hasQuestions =
     install &&
     (settings.ingresses.length > 0 ||
       settings.storage.length > 0 ||
       settings.disks.length > 0 ||
       settings.presets.length > 0 ||
-      settings.replicas.length > 0);
+      settings.replicas.length > 0 ||
+      (settings.passwords ?? []).length > 0 ||
+      (settings.gitSources ?? []).length > 0);
 
   return (
     <div className="cat-form">
@@ -933,11 +989,96 @@ function InstallForm({
         setExtra={setExtra}
         docs={docs}
         examples={info.examples ?? {}}
-        secrets={hints?.secrets}
+        secrets={allSecrets}
         kept={kept}
+        release={release}
+        onAddSecret={onAddSecret}
       />
 
       {hasQuestions && <div className="cat-side-title">Questions</div>}
+
+      {install && gs && (
+        <div className="cat-question">
+          <label className="checkbox cat-q">
+            <input type="checkbox" checked={git.on} onChange={(e) => setGit({ ...git, on: e.target.checked })} /> Load{" "}
+            <span className="mono">{gs.path.replace(/\.(gitSync|git|gitRepo|gitSource|repository)$/, "")}</span> from a Git
+            repository
+          </label>
+          <div className="cat-why">
+            {docs[gs.path.replace(/\.[^.]+$/, "")] ||
+              "The chart can take its content from a repository and keep it up to date — without it, it starts empty."}
+          </div>
+          {git.on && (
+            <div className="cat-ingress">
+              <div className="field">
+                <label className="muted">Repository</label>
+                <input
+                  className="input mono"
+                  value={git.repo}
+                  placeholder="https://git.example.com/team/repo.git"
+                  onChange={(e) => setGit({ ...git, repo: e.target.value.trim() })}
+                />
+              </div>
+              {gs.branchKeys.length > 0 && (
+                <div className="field">
+                  <label className="muted">Branch</label>
+                  <input className="input mono" value={git.branch} onChange={(e) => setGit({ ...git, branch: e.target.value.trim() })} />
+                </div>
+              )}
+              {gs.folderKey && (
+                <div className="field">
+                  <label className="muted">Folder in the repository</label>
+                  <input
+                    className="input mono"
+                    value={git.folder}
+                    placeholder="empty — the top of the repository"
+                    onChange={(e) => setGit({ ...git, folder: e.target.value.trim() })}
+                  />
+                </div>
+              )}
+              {gs.credentialsKey && (
+                <div className="field">
+                  <label className="muted">Access</label>
+                  <select className="input" value={git.access} onChange={(e) => setGit({ ...git, access: e.target.value })}>
+                    <option value="">public — no login</option>
+                    <option value={NEW_LOGIN}>a login — typed here, kept in a new Secret</option>
+                    {(hints?.secrets ?? []).map((x) => (
+                      <option key={x.name} value={x.name}>
+                        Secret {x.name}
+                      </option>
+                    ))}
+                  </select>
+                  {git.access === NEW_LOGIN && (
+                    <div className="cat-login">
+                      <input
+                        className="input"
+                        value={git.user}
+                        placeholder="user name"
+                        autoComplete="off"
+                        onChange={(e) => setGit({ ...git, user: e.target.value.trim() })}
+                      />
+                      <input
+                        className="input"
+                        type="password"
+                        value={git.pass}
+                        placeholder="password or access token"
+                        autoComplete="new-password"
+                        onChange={(e) => setGit({ ...git, pass: e.target.value })}
+                      />
+                      <div className="field-hint">
+                        Kept in the Secret <span className="mono">{gitSecretName}</span>, made with the release — never
+                        shown in the request.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!git.repo && <div className="field-hint">Type the repository's address to switch it on.</div>}
+              {handEdited(kept.filter((k) => k.startsWith(gs.path + ".")))}
+            </div>
+          )}
+        </div>
+      )}
 
       {install && settings.ingresses.length > 0 && hints && (
         <div className="cat-question">
@@ -1067,6 +1208,68 @@ function InstallForm({
               {handEdited(keptOf(settings.disks))}
             </div>
           )}
+        </div>
+      )}
+
+      {install && (settings.passwords ?? []).length > 0 && (
+        <div className="cat-question">
+          <div className="cat-q">Passwords</div>
+          <div className="cat-why">
+            The chart's own are known to anyone who reads it. Set yours, or let the portal make one up — it is kept in the
+            release's values.
+          </div>
+          {(settings.passwords ?? []).map((pw, i) => (
+            <div className="field" key={pw.paths.join(",")}>
+              <label className="mono cat-asked-key" title={pw.paths.join(", ")}>
+                {pw.paths[0]}
+                {pw.paths.length > 1 && <span className="cat-dim"> · and {pw.paths.length - 1} more, set together</span>}
+              </label>
+              <div className="cat-why">
+                {pw.default
+                  ? `The chart ships “${pw.default}”${pw.paths.length > 1 ? " in each of these places — they must match" : ""}.`
+                  : "Left empty, the chart makes one up."}
+              </div>
+              <div className="cat-password">
+                <input
+                  className="input mono"
+                  type={shown[i] ? "text" : "password"}
+                  value={passwords[i] ?? ""}
+                  autoComplete="new-password"
+                  placeholder={pw.default ? "the chart's" : "made up by the chart"}
+                  onChange={(e) => setPasswords((p) => ({ ...p, [i]: e.target.value }))}
+                />
+                <button className="btn ghost sm" type="button" onClick={() => setShown((x) => ({ ...x, [i]: !x[i] }))}>
+                  {shown[i] ? "Hide" : "Show"}
+                </button>
+                <button
+                  className="btn ghost sm"
+                  type="button"
+                  onClick={() => {
+                    setPasswords((p) => ({ ...p, [i]: makePassword() }));
+                    setShown((x) => ({ ...x, [i]: true }));
+                  }}
+                >
+                  Generate
+                </button>
+              </div>
+              {handEdited(keptOf(pw.paths))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {install && newSecrets.length > 0 && (
+        <div className="cat-question">
+          <div className="cat-q">Secrets made with the release</div>
+          {newSecrets.map((x) => (
+            <div className="cat-new-secret" key={x.name}>
+              <span className="mono">{x.name}</span>
+              <span className="muted"> · {Object.keys(x.data).join(", ")}</span>
+              <button className="link-btn" onClick={() => onDropSecret(x.name)}>
+                remove
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1200,6 +1403,8 @@ function ChartNeeds({
   examples,
   secrets,
   kept,
+  release,
+  onAddSecret,
 }: {
   asked: { key: string; said: string }[];
   stillAsked: Set<string>;
@@ -1210,9 +1415,12 @@ function ChartNeeds({
   setExtra: (f: (t: Record<string, string>) => Record<string, string>) => void;
   docs: Record<string, string>;
   examples: Record<string, string>;
-  secrets?: { name: string; keys: string[] }[];
+  secrets?: { name: string; keys: string[]; fresh?: boolean }[];
   kept: string[];
+  release: string;
+  onAddSecret: (s: NewSecret) => void;
 }) {
+  const [creating, setCreating] = useState<string | null>(null);
   const known = (k: string) => k in examples || k in docs;
   const shown = new Set(asked.map((a) => a.key));
 
@@ -1271,9 +1479,28 @@ function ChartNeeds({
         {said && <div className="cat-why">{said}</div>}
         {secretish && (
           <div className="cat-why">
-            The name of a Secret in this namespace that holds it — not the value itself.
-            {secrets && secrets.length === 0 && " There are none here yet: create one under Secrets & ConfigMaps."}
+            The name of a Secret in this namespace that holds it — not the value itself.{" "}
+            <button className="link-btn" onClick={() => setCreating(creating === k ? null : k)}>
+              + New Secret…
+            </button>
           </div>
+        )}
+        {secretish && creating === k && (
+          <NewSecretEditor
+            name={`${release || "app"}-${lastOf(parentOf(k)) || "secret"}`.toLowerCase().replace(/[^a-z0-9.-]/g, "-")}
+            keys={["password"]}
+            taken={(secrets ?? []).map((x) => x.name)}
+            onSave={(sec) => {
+              onAddSecret(sec);
+              set((t) => ({ ...t, [k]: sec.name }));
+              const keyField = parentOf(k) + ".key";
+              if (keyField in examples || keyField in docs) {
+                setExtra((t) => ({ ...t, [keyField]: t[keyField] || Object.keys(sec.data)[0] }));
+              }
+              setCreating(null);
+            }}
+            onCancel={() => setCreating(null)}
+          />
         )}
         {lastOf(k) === "key" && !secretish && k.endsWith(".key") && (
           <div className="cat-why">The key inside that Secret.</div>
@@ -1350,6 +1577,93 @@ function volumeName(path: string): string {
 function partOf(path: string, parts: Record<string, string>): string | undefined {
   const top = path.split(".")[0];
   return top in parts ? parts[top] : undefined;
+}
+
+type NewSecret = { name: string; data: Record<string, string> };
+
+const NEW_LOGIN = "\u0000login";
+
+/** A login for a repository, as the tool reading it wants it: the
+    kubernetes git-sync sidecar reads GITSYNC_… (and GIT_SYNC_… before v4). */
+function gitLogin(gitSync: boolean, user: string, pass: string): Record<string, string> {
+  if (!gitSync) return { username: user, password: pass };
+  return { GITSYNC_USERNAME: user, GITSYNC_PASSWORD: pass, GIT_SYNC_USERNAME: user, GIT_SYNC_PASSWORD: pass };
+}
+
+/** A password nobody guesses: 20 letters and digits from the browser's
+    random source. */
+function makePassword(): string {
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, (b) => abc[b % abc.length]).join("");
+}
+
+/** A Secret made with the release: a name and its keys, values typed once. */
+function NewSecretEditor({
+  name: initialName,
+  keys,
+  taken,
+  onSave,
+  onCancel,
+}: {
+  name: string;
+  keys: string[];
+  taken: string[];
+  onSave: (s: NewSecret) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [rows, setRows] = useState<{ k: string; v: string }[]>((keys.length ? keys : [""]).map((k) => ({ k, v: "" })));
+  const nameOK = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/.test(name);
+  const keysOK = rows.every((r) => /^[-._a-zA-Z0-9]+$/.test(r.k)) && new Set(rows.map((r) => r.k)).size === rows.length;
+  const problem = !nameOK
+    ? "A name is lower-case letters, digits, dashes and dots."
+    : taken.includes(name)
+      ? "There is a Secret by that name — pick it in the field instead."
+      : !keysOK
+        ? "Each key is letters, digits, dashes, dots or underscores, and different."
+        : "";
+  return (
+    <div className="cat-secret-editor">
+      <input className="input mono" value={name} onChange={(e) => setName(e.target.value.trim())} aria-label="Secret name" />
+      {rows.map((r, i) => (
+        <div className="cat-secret-row" key={i}>
+          <input
+            className="input mono"
+            value={r.k}
+            placeholder="key"
+            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, k: e.target.value.trim() } : x)))}
+          />
+          <input
+            className="input mono"
+            type="password"
+            value={r.v}
+            placeholder="value"
+            autoComplete="new-password"
+            onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)))}
+          />
+        </div>
+      ))}
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <button className="link-btn" onClick={() => setRows([...rows, { k: "", v: "" }])}>
+          + another key
+        </button>
+        <span style={{ flex: 1 }} />
+        <button className="btn ghost sm" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          className="btn sm"
+          disabled={!!problem || rows.some((r) => !r.v)}
+          onClick={() => onSave({ name, data: Object.fromEntries(rows.map((r) => [r.k, r.v])) })}
+        >
+          Make it with the release
+        </button>
+      </div>
+      {problem && <div className="field-hint cat-kept">{problem}</div>}
+      <div className="field-hint">Created in the namespace just before the install. Its values are never shown again.</div>
+    </div>
+  );
 }
 
 /** Saves text as a file in the browser. */

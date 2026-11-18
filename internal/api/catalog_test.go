@@ -106,6 +106,9 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 			return ns == "payments-dev" || ns == "accounts-dev" || ns == "devops-tools", nil
 		},
 		templates: helmreq.NewMemoryTemplates(),
+		secretExists: func(_ context.Context, ns, name string) (bool, error) {
+			return ns == "payments-dev" && name == "taken", nil
+		},
 		hints: func(context.Context, string) *kube.ClusterHints {
 			return &kube.ClusterHints{StorageClasses: []kube.StorageClassHint{{Name: "local-path", Default: true}}}
 		},
@@ -455,5 +458,39 @@ func TestStartingValues(t *testing.T) {
 	}
 	if _, info := f.call(t, "anna", "GET", "/api/helm/catalog/bitnami/redis?version=21.2.3", nil); info["template"] != nil {
 		t.Errorf("removed, still there: %v", info["template"])
+	}
+}
+
+// Secrets asked with a release are kept with the request and never shown:
+// names and keys are.
+func TestRequestWithSecrets(t *testing.T) {
+	f := newCatalogFixture(t)
+	body := func(name string, data map[string]string) map[string]any {
+		return map[string]any{"kind": "install", "release": "cache", "repo": "bitnami", "chart": "redis",
+			"version": "21.2.3", "values": "", "secrets": []map[string]any{{"name": name, "data": data}}}
+	}
+	if code, _ := f.call(t, "anna", "POST", reqs, body("taken", map[string]string{"k": "v"})); code != http.StatusBadRequest {
+		t.Errorf("a Secret already there: %d", code)
+	}
+	if code, _ := f.call(t, "anna", "POST", reqs, body("Bad_Name", map[string]string{"k": "v"})); code != http.StatusBadRequest {
+		t.Errorf("a name Kubernetes refuses: %d", code)
+	}
+	if code, _ := f.call(t, "anna", "POST", reqs, body("app-git", map[string]string{"bad key!": "v"})); code != http.StatusBadRequest {
+		t.Errorf("a key Kubernetes refuses: %d", code)
+	}
+	code, q := f.call(t, "anna", "POST", reqs, body("app-git", map[string]string{"GITSYNC_USERNAME": "bot", "GITSYNC_PASSWORD": "hunter2"}))
+	if code != http.StatusCreated {
+		t.Fatalf("request: %d %v", code, q)
+	}
+	raw, _ := json.Marshal(q)
+	if strings.Contains(string(raw), "hunter2") || !strings.Contains(string(raw), "GITSYNC_PASSWORD") {
+		t.Errorf("shown: %s", raw)
+	}
+	req := httptest.NewRequest("GET", "/api/helm/requests", nil)
+	req.Header.Set("X-User", "root")
+	rec := httptest.NewRecorder()
+	f.h.ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), "hunter2") {
+		t.Error("the administrators' list shows what a Secret holds")
 	}
 }

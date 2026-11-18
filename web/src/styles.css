@@ -3665,3 +3665,39 @@ a.seg-btn {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+.cat-password {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+.cat-login {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.cat-secret-editor {
+  border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cat-secret-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+.cat-new-secret {
+  font-size: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin: 3px 0;
+}
+.cat-review-secrets {
+  margin-bottom: 8px;
+}

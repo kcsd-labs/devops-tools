@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -143,6 +144,46 @@ func (m *Manager) CreateNamespace(ctx context.Context, name, requestedBy string)
 	}, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		return nil
+	}
+	return err
+}
+
+// SecretExists reports whether a namespace has a Secret by that name; a
+// namespace that is not there has none.
+func (m *Manager) SecretExists(ctx context.Context, namespace, name string) (bool, error) {
+	cs, err := m.Clientset("")
+	if err != nil {
+		return false, err
+	}
+	_, err = cs.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CreateSecretFor creates a Secret a release from the catalog was asked
+// with, marked as the portal's and the release's.
+func (m *Manager) CreateSecretFor(ctx context.Context, namespace, name string, data map[string]string, release string) error {
+	cs, err := m.Clientset("")
+	if err != nil {
+		return err
+	}
+	_, err = cs.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      map[string]string{"app.kubernetes.io/managed-by": "devops-tools"},
+			Annotations: map[string]string{"devops-tools/created-for-release": release},
+		},
+		Type:       corev1.SecretTypeOpaque,
+		StringData: data,
+	}, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("a Secret named %s is already in %s", name, namespace)
 	}
 	return err
 }

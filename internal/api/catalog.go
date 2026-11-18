@@ -60,6 +60,8 @@ type catalog struct {
 	nsExists func(ctx context.Context, ns string) (bool, error)
 	// templates are the starting values administrators keep per chart.
 	templates helmreq.Templates
+	// secretExists says whether a namespace has a Secret by that name.
+	secretExists func(ctx context.Context, ns, name string) (bool, error)
 }
 
 // WithCatalog switches the catalog on.
@@ -73,6 +75,7 @@ func (s *Server) WithCatalog(hub *helmcat.Hub, fetcher *helmcat.Fetcher, request
 	c.fromCatalog = s.kube.ListCatalogReleases
 	c.hints = s.kube.GetClusterHints
 	c.nsExists = s.kube.NamespaceExists
+	c.secretExists = s.kube.SecretExists
 	c.templates = helmreq.NewMemoryTemplates()
 	c.namespaces = func(ctx context.Context) ([]string, error) {
 		return s.kube.ListNamespaces(ctx, "", s.cfg.Cluster.HiddenNamespaces)
@@ -205,6 +208,47 @@ func (s *Server) mayInstallSomewhere(roles []string) bool {
 }
 
 var namespaceRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
+var (
+	secretNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+	secretKeyRE  = regexp.MustCompile(`^[-._a-zA-Z0-9]{1,253}$`)
+)
+
+// checkNewSecrets checks the Secrets a request would create: names and keys
+// Kubernetes takes, a sane size, and none already in the namespace — that
+// one is picked by its name instead.
+func (s *Server) checkNewSecrets(ctx context.Context, ns string, secrets []helmreq.NewSecret) error {
+	if len(secrets) > 5 {
+		return fmt.Errorf("at most five Secrets are created with a release")
+	}
+	seen := map[string]bool{}
+	size := 0
+	for _, sec := range secrets {
+		if !secretNameRE.MatchString(sec.Name) {
+			return fmt.Errorf("%q is not a Secret name: lower-case letters, digits, dashes and dots", sec.Name)
+		}
+		if seen[sec.Name] {
+			return fmt.Errorf("the Secret %s is asked for twice", sec.Name)
+		}
+		seen[sec.Name] = true
+		if len(sec.Data) == 0 || len(sec.Data) > 30 {
+			return fmt.Errorf("the Secret %s needs between one and thirty keys", sec.Name)
+		}
+		for k, v := range sec.Data {
+			if !secretKeyRE.MatchString(k) {
+				return fmt.Errorf("%q is not a key a Secret takes: letters, digits, dashes, dots and underscores", k)
+			}
+			size += len(k) + len(v)
+		}
+		if exists, err := s.catalog.secretExists(ctx, ns, sec.Name); err == nil && exists {
+			return fmt.Errorf("%s already has a Secret named %s — pick it by its name instead", ns, sec.Name)
+		}
+	}
+	if size > 256<<10 {
+		return fmt.Errorf("the Secrets are too large: 256 KiB at most")
+	}
+	return nil
+}
 
 // newNamespaceProblem says why ns cannot be a new namespace, or "".
 func (s *Server) newNamespaceProblem(ctx context.Context, ns string) string {
@@ -437,6 +481,8 @@ type catalogAsk struct {
 	// Help asks an administrator to finish values that do not pass yet,
 	// saying what is missing.
 	Help string `json:"help,omitempty"`
+	// Secrets are created in the namespace before the install.
+	Secrets []helmreq.NewSecret `json:"secrets,omitempty"`
 }
 
 // checkResult is a plan, with what the registries said about its images.
@@ -516,6 +562,9 @@ func parseValues(text string) (map[string]any, error) {
 func (s *Server) check(ctx context.Context, ns string, ask *catalogAsk, wantDigest string) (*checkResult, *chart.Chart, map[string]any, error) {
 	vals, err := parseValues(ask.Values)
 	if err != nil {
+		return nil, nil, nil, askError{err}
+	}
+	if err := s.checkNewSecrets(ctx, ns, ask.Secrets); err != nil {
 		return nil, nil, nil, askError{err}
 	}
 	start := time.Now()
@@ -662,6 +711,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		Digest: res.Digest, Values: ask.Values, Objects: objectList(res.ReleasePlan),
 		Requester: user.Username, Created: now, Expires: now.Add(s.cfg.Catalog.RequestTTL),
 		Status: helmreq.StatusWaiting, NewNamespace: ask.NewNamespace, Notes: res.Notes,
+		Secrets: ask.Secrets,
 	}
 	if !res.OK {
 		req.Help = help
@@ -682,7 +732,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	if direct {
 		s.startInstall(req, ch, vals)
 	}
-	writeJSON(w, http.StatusCreated, req)
+	writeJSON(w, http.StatusCreated, req.Redacted())
 }
 
 func (s *Server) openRequestFor(ctx context.Context, ns, release string) *helmreq.Request {
@@ -713,6 +763,9 @@ func requestDetail(q *helmreq.Request, vals map[string]any) string {
 	}
 	if q.Help != "" {
 		d += "; asks for help"
+	}
+	for _, sec := range q.Redacted().Secrets {
+		d += "; creates Secret " + sec.Name + " (" + strings.Join(sec.Keys, ", ") + ")"
 	}
 	return d
 }
@@ -758,7 +811,7 @@ func (s *Server) handleMyRequests(w http.ResponseWriter, r *http.Request) {
 	for _, q := range all {
 		if q.Requester == user.Username || s.mayAskFor(user.Roles, q.Namespace) ||
 			s.authz.Allowed(user.Roles, q.Namespace, OpHelmList) {
-			out = append(out, q)
+			out = append(out, q.Redacted())
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -788,7 +841,7 @@ func (s *Server) handleWithdrawRequest(w http.ResponseWriter, r *http.Request) {
 	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: ns,
 		Operation: "helm-request-withdraw", Target: q.Release, Allowed: true, Success: true,
 		Detail: q.Chart + " " + q.Version})
-	writeJSON(w, http.StatusOK, q)
+	writeJSON(w, http.StatusOK, q.Redacted())
 }
 
 func (s *Server) handleAllRequests(w http.ResponseWriter, r *http.Request) {
@@ -797,7 +850,11 @@ func (s *Server) handleAllRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, all)
+	shown := make([]*helmreq.Request, len(all))
+	for i, q := range all {
+		shown[i] = q.Redacted()
+	}
+	writeJSON(w, http.StatusOK, shown)
 }
 
 func (s *Server) handleRequestCount(w http.ResponseWriter, r *http.Request) {
@@ -831,7 +888,8 @@ func (s *Server) handleCheckRequest(w http.ResponseWriter, r *http.Request) {
 		requestError(w, err)
 		return
 	}
-	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values}
+	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values,
+		Secrets: q.Secrets}
 	if body.Values != nil {
 		ask.Values = *body.Values
 	}
@@ -880,7 +938,8 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values}
+	ask := &catalogAsk{Kind: q.Kind, Release: q.Release, Repo: q.Repo, Chart: q.Chart, Version: q.Version, Values: q.Values,
+		Secrets: q.Secrets}
 	changed := body.Values != nil && strings.TrimSpace(*body.Values) != strings.TrimSpace(q.Values)
 	if changed {
 		ask.Values = *body.Values
@@ -928,7 +987,7 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: q.Namespace,
 		Operation: "helm-" + q.Kind, Target: q.Release, Allowed: true, Success: true, Detail: detail})
 	s.startInstall(q, ch, vals)
-	writeJSON(w, http.StatusOK, q)
+	writeJSON(w, http.StatusOK, q.Redacted())
 }
 
 func (s *Server) handleRejectRequest(w http.ResponseWriter, r *http.Request) {
@@ -958,7 +1017,7 @@ func (s *Server) handleRejectRequest(w http.ResponseWriter, r *http.Request) {
 	s.audit.Log(audit.Entry{User: user.Username, Environment: s.cfg.Environment, Namespace: q.Namespace,
 		Operation: "helm-request-reject", Target: q.Release, Allowed: true, Success: true,
 		Detail: q.Chart + " " + q.Version + "; requested by " + q.Requester})
-	writeJSON(w, http.StatusOK, q)
+	writeJSON(w, http.StatusOK, q.Redacted())
 }
 
 // startInstall runs an approved request in the background: waiting for pods
@@ -994,6 +1053,11 @@ func (s *Server) runInstall(ctx context.Context, q *helmreq.Request, ch *chart.C
 	if q.NewNamespace && q.Kind == helmreq.KindInstall {
 		if err := s.kube.CreateNamespace(ctx, q.Namespace, q.Requester); err != nil {
 			return fmt.Errorf("create the namespace %s: %w", q.Namespace, err)
+		}
+	}
+	for _, sec := range q.Secrets {
+		if err := s.kube.CreateSecretFor(ctx, q.Namespace, sec.Name, sec.Data, q.Release); err != nil {
+			return fmt.Errorf("create the Secret %s: %w", sec.Name, err)
 		}
 	}
 	if q.Kind == helmreq.KindUpgrade {
