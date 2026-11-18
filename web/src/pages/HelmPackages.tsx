@@ -554,7 +554,15 @@ function RequestList({
                 <b className="mono">{q.release}</b> <span className="cm-pill">{q.namespace}</span>{" "}
                 <span className="muted">{requestLine(q)}</span>
               </div>
-              <div className={"cat-desc-line " + (q.status === "failed" ? "cat-failed" : "muted")}>{requestNote(q)}</div>
+              <div className={"cat-desc-line " + (q.status === "failed" && !q.uninstalled ? "cat-failed" : "muted")}>
+                {requestNote(q)}
+              </div>
+              {q.error && q.error !== q.detail && (
+                <details className="cat-raw">
+                  <summary>What Helm said</summary>
+                  <pre>{q.error}</pre>
+                </details>
+              )}
               {q.status === "installing" && q.progress && <InstallProgress p={q.progress} />}
             </div>
             <RequestStatus r={q} />
@@ -571,9 +579,9 @@ function RequestList({
             <button className="btn ghost sm" onClick={() => setValuesOf(q)}>
               {q.askedValues != null ? "Values · changed" : "Values"}
             </button>
-            {["expired", "rejected", "failed", "withdrawn"].includes(q.status) && (
+            {(["expired", "rejected", "failed", "withdrawn"].includes(q.status) || q.uninstalled) && (
               <button className="btn ghost sm" onClick={() => onSendAgain(q)}>
-                {q.status === "failed" ? "Try again" : "Send again"}
+                {q.uninstalled ? "Install again" : q.status === "failed" ? "Try again" : "Send again"}
               </button>
             )}
           </div>

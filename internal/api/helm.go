@@ -77,6 +77,7 @@ func (s *Server) handleUninstall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.markUninstalled(r.Context(), namespace, name, user.Username)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "uninstalled", "release": name, "warning": warning,
 	})

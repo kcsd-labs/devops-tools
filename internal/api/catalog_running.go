@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -200,4 +201,52 @@ func (s *Server) stopInstallOf(ns, release, by string) {
 		case <-time.After(10 * time.Second):
 		}
 	}
+}
+
+// markUninstalled notes on a release's requests that it was removed: what
+// they ended as is history now.
+func (s *Server) markUninstalled(ctx context.Context, ns, release, by string) {
+	if s.catalog == nil {
+		return
+	}
+	all, err := s.catalog.requests.List(ctx)
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	for _, q := range all {
+		if q.Namespace != ns || q.Release != release || q.Uninstalled != nil ||
+			(q.Status != helmreq.StatusInstalled && q.Status != helmreq.StatusFailed && q.Status != helmreq.StatusInstalling) {
+			continue
+		}
+		if _, err := s.catalog.requests.Update(ctx, q.ID, func(r *helmreq.Request) error {
+			if r.Uninstalled == nil {
+				r.Uninstalled, r.UninstalledBy = &now, by
+				if r.Status == helmreq.StatusInstalling {
+					r.Status, r.Detail = helmreq.StatusFailed, "stopped by "+by+" to uninstall it"
+				}
+			}
+			return nil
+		}); err != nil {
+			slog.Error("note an uninstall on a request", "request", q.ID, "err", err)
+		}
+	}
+}
+
+// failureSummary says in a few words why an install failed; Helm's own
+// words stay on the request beside it.
+func failureSummary(raw string, timeout time.Duration) string {
+	low := strings.ToLower(raw)
+	switch {
+	case strings.Contains(low, "wait for resources failed") || strings.Contains(low, "timed out waiting") ||
+		strings.Contains(low, "context deadline exceeded"):
+		within := timeout.String()
+		if timeout >= time.Minute && timeout%time.Minute == 0 {
+			within = fmt.Sprintf("%d min", int(timeout.Minutes()))
+		}
+		return "the pods were not ready within " + within
+	case strings.Contains(low, "context canceled"):
+		return "the install was stopped"
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(raw, "INSTALLATION FAILED: "), "UPGRADE FAILED: ")
 }

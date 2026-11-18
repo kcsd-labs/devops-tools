@@ -1038,9 +1038,10 @@ func (s *Server) startInstall(q *helmreq.Request, ch *chart.Chart, vals map[stri
 		defer s.catalog.running.done(q.ID)
 		err := s.catalog.installer(ctx, q, ch, vals)
 		close(run.finished)
-		status, detail := helmreq.StatusInstalled, ""
+		status, detail, raw := helmreq.StatusInstalled, "", ""
 		if err != nil {
-			status, detail = helmreq.StatusFailed, err.Error()
+			raw = err.Error()
+			status, detail = helmreq.StatusFailed, failureSummary(raw, s.cfg.Catalog.InstallTimeout)
 			if by, why := run.stopped(); by != "" {
 				detail = "stopped by " + by
 				if why != "" {
@@ -1056,7 +1057,7 @@ func (s *Server) startInstall(q *helmreq.Request, ch *chart.Chart, vals map[stri
 			tcancel()
 		}
 		if _, uerr := s.catalog.requests.Update(context.Background(), q.ID, func(r *helmreq.Request) error {
-			r.Status, r.Detail = status, detail
+			r.Status, r.Detail, r.Error = status, detail, raw
 			return nil
 		}); uerr != nil {
 			slog.Error("record how a catalog install ended", "request", q.ID, "err", uerr)

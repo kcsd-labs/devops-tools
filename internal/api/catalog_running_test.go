@@ -79,3 +79,34 @@ func TestOrphanedInstallSettles(t *testing.T) {
 		t.Errorf("orphan: %v", list)
 	}
 }
+
+// A release removed through the portal leaves its requests as history: how
+// they ended is no longer a problem to look at.
+func TestUninstallMarksRequests(t *testing.T) {
+	f := newCatalogFixture(t)
+	now := time.Now()
+	for i, st := range []string{helmreq.StatusFailed, helmreq.StatusInstalled, helmreq.StatusRejected} {
+		q := &helmreq.Request{ID: "u" + string(rune('0'+i)), Namespace: "payments-dev", Release: "redis", Status: st,
+			Created: now, Expires: now.Add(time.Hour)}
+		if err := f.s.catalog.requests.Create(context.Background(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.s.markUninstalled(context.Background(), "payments-dev", "redis", "root")
+	for id, want := range map[string]bool{"u0": true, "u1": true, "u2": false} {
+		q, _ := f.s.catalog.requests.Get(context.Background(), id)
+		if (q.Uninstalled != nil) != want || (want && q.UninstalledBy != "root") {
+			t.Errorf("%s (%s): uninstalled %v by %q", id, q.Status, q.Uninstalled, q.UninstalledBy)
+		}
+	}
+}
+
+func TestFailureSummary(t *testing.T) {
+	raw := `context deadline exceeded: Error received when checking status of resource redis-headless; wait for resources failed after 5m0s: context deadline exceeded`
+	if got := failureSummary(raw, 5*time.Minute); got != "the pods were not ready within 5 min" {
+		t.Errorf("%q", got)
+	}
+	if got := failureSummary("INSTALLATION FAILED: services \"x\" already exists", time.Minute); got != `services "x" already exists` {
+		t.Errorf("%q", got)
+	}
+}

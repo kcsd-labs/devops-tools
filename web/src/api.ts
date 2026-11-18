@@ -219,6 +219,11 @@ export interface HelmRequest {
   decided?: string;
   comment?: string;
   detail?: string;
+  /** What Helm said when it failed, word for word. */
+  error?: string;
+  /** The release was removed through the portal: the request is history. */
+  uninstalled?: string;
+  uninstalledBy?: string;
   /** The namespace is created on approval. */
   newNamespace?: boolean;
   /** What the requester could not fill in, for the administrator. */

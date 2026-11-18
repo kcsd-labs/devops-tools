@@ -84,6 +84,13 @@ type Request struct {
 	Comment   string     `json:"comment,omitempty"`
 	// Detail is how an install ended: what failed, or nothing.
 	Detail string `json:"detail,omitempty"`
+	// Error is what Helm said when it failed, word for word, for whoever
+	// wants more than Detail.
+	Error string `json:"error,omitempty"`
+	// Uninstalled is when the release was removed through the portal, and
+	// by whom: the request is history then, whatever it ended as.
+	Uninstalled   *time.Time `json:"uninstalled,omitempty"`
+	UninstalledBy string     `json:"uninstalledBy,omitempty"`
 }
 
 // NewSecret is a Secret to create with a release. Data is kept with the

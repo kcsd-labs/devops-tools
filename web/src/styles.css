@@ -3722,3 +3722,24 @@ a.seg-btn {
   gap: 8px;
   margin-bottom: 4px;
 }
+
+/* Helm's own words on a failed install, folded away. */
+.cat-raw {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.cat-raw summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.cat-raw pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 200px;
+  overflow: auto;
+}
