@@ -32,6 +32,8 @@ type catalogFixture struct {
 	// installed receives the values each install ran with.
 	installed chan map[string]any
 	s         *Server
+	// made are the releases the fake installer made.
+	made []string
 }
 
 var catalogUsers = map[string][]string{"anna": {"dev"}, "bob": {"dev"}, "root": {"admin"}}
@@ -91,7 +93,10 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 			}
 			return out
 		},
-		installer: func(_ context.Context, _ *helmreq.Request, _ *chart.Chart, vals map[string]any) error {
+		installer: func(_ context.Context, q *helmreq.Request, _ *chart.Chart, vals map[string]any) error {
+			f.mu.Lock()
+			f.made = append(f.made, q.Release)
+			f.mu.Unlock()
 			f.installed <- vals
 			return nil
 		},
@@ -101,7 +106,13 @@ func newCatalogFixture(t *testing.T) *catalogFixture {
 			return &kube.InstallProgress{Ready: 1, Pods: 2, Trouble: []string{"redis-master-0: Unhealthy — Readiness probe failed"}}
 		},
 		releases: func(string) ([]kube.HelmRelease, error) {
-			return []kube.HelmRelease{{Name: "redis", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "redis"}}, {Name: "payments-api"}}, nil
+			out := []kube.HelmRelease{{Name: "redis", Catalog: &kube.CatalogOrigin{Repo: "bitnami", Chart: "redis"}}, {Name: "payments-api"}}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			for _, name := range f.made {
+				out = append(out, kube.HelmRelease{Name: name})
+			}
+			return out, nil
 		},
 		namespaces: func(context.Context) ([]string, error) {
 			return []string{"devops-tools", "payments-dev", "accounts-dev"}, nil

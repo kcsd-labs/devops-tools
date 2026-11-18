@@ -91,6 +91,9 @@ type Request struct {
 	// by whom: the request is history then, whatever it ended as.
 	Uninstalled   *time.Time `json:"uninstalled,omitempty"`
 	UninstalledBy string     `json:"uninstalledBy,omitempty"`
+	// NothingLeft: the install failed before Helm made the release, so there
+	// is nothing in the cluster to remove — only the failure to read.
+	NothingLeft bool `json:"nothingLeft,omitempty"`
 }
 
 // NewSecret is a Secret to create with a release. Data is kept with the

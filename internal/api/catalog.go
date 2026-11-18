@@ -1056,8 +1056,9 @@ func (s *Server) startInstall(q *helmreq.Request, ch *chart.Chart, vals map[stri
 			}
 			tcancel()
 		}
+		nothingLeft := err != nil && !s.releaseExists(q.Namespace, q.Release)
 		if _, uerr := s.catalog.requests.Update(context.Background(), q.ID, func(r *helmreq.Request) error {
-			r.Status, r.Detail, r.Error = status, detail, raw
+			r.Status, r.Detail, r.Error, r.NothingLeft = status, detail, raw, nothingLeft
 			return nil
 		}); uerr != nil {
 			slog.Error("record how a catalog install ended", "request", q.ID, "err", uerr)

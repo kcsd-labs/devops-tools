@@ -108,7 +108,7 @@ const STATUS: Record<HelmRequest["status"], [string, string]> = {
 };
 
 export function RequestStatus({ r }: { r: HelmRequest }) {
-  const [text, cls] = r.uninstalled ? ["Uninstalled", "badge-muted"] : (STATUS[r.status] ?? [r.status, "badge-muted"]);
+  const [text, cls] = STATUS[r.status] ?? [r.status, "badge-muted"];
   return <span className={"badge " + cls}>{text}</span>;
 }
 
@@ -139,10 +139,6 @@ export function requestLine(r: HelmRequest): string {
 }
 
 export function requestNote(r: HelmRequest): string {
-  if (r.uninstalled) {
-    const was = r.status === "failed" ? `it had failed: ${r.detail ?? "the install failed"}` : "it had been installed";
-    return `uninstalled by ${r.uninstalledBy} · ${ago(r.uninstalled)} · ${was}`;
-  }
   switch (r.status) {
     case "waiting":
       return `${r.requester} · ${ago(r.created)} · expires ${until(r.expires)}`;

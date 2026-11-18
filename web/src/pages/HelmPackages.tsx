@@ -554,7 +554,7 @@ function RequestList({
                 <b className="mono">{q.release}</b> <span className="cm-pill">{q.namespace}</span>{" "}
                 <span className="muted">{requestLine(q)}</span>
               </div>
-              <div className={"cat-desc-line " + (q.status === "failed" && !q.uninstalled ? "cat-failed" : "muted")}>
+              <div className={"cat-desc-line " + (q.status === "failed" ? "cat-failed" : "muted")}>
                 {requestNote(q)}
               </div>
               {q.error && q.error !== q.detail && (
@@ -579,9 +579,9 @@ function RequestList({
             <button className="btn ghost sm" onClick={() => setValuesOf(q)}>
               {q.askedValues != null ? "Values · changed" : "Values"}
             </button>
-            {(["expired", "rejected", "failed", "withdrawn"].includes(q.status) || q.uninstalled) && (
+            {["expired", "rejected", "failed", "withdrawn"].includes(q.status) && (
               <button className="btn ghost sm" onClick={() => onSendAgain(q)}>
-                {q.uninstalled ? "Install again" : q.status === "failed" ? "Try again" : "Send again"}
+                {q.status === "failed" ? "Try again" : "Send again"}
               </button>
             )}
           </div>

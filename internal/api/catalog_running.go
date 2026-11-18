@@ -100,9 +100,13 @@ type requestView struct {
 // more — the portal restarted under them — are settled first.
 func (s *Server) viewRequests(ctx context.Context, user *auth.User, list []*helmreq.Request) []requestView {
 	out := make([]requestView, 0, len(list))
+	gone := s.goneReleases()
 	for _, q := range list {
 		if q.Status == helmreq.StatusInstalling {
 			q = s.settleOrphan(ctx, q)
+		}
+		if removed(q, gone) {
+			continue
 		}
 		v := requestView{Request: q.Redacted()}
 		if q.Status == helmreq.StatusInstalling {
@@ -249,4 +253,45 @@ func failureSummary(raw string, timeout time.Duration) string {
 		return "the install was stopped"
 	}
 	return strings.TrimPrefix(strings.TrimPrefix(raw, "INSTALLATION FAILED: "), "UPGRADE FAILED: ")
+}
+
+// removed: a request whose release was installed — or left behind failed —
+// and is no longer in the cluster. It was uninstalled, through the portal or
+// not, and is no longer something to look at; the audit keeps the history.
+func removed(q *helmreq.Request, gone func(ns, release string) bool) bool {
+	switch {
+	case q.Uninstalled != nil:
+		return true
+	case q.Status == helmreq.StatusInstalled, q.Status == helmreq.StatusFailed && !q.NothingLeft:
+		return gone(q.Namespace, q.Release)
+	}
+	return false
+}
+
+// goneReleases says whether a release is missing from its namespace, reading
+// each namespace once. A namespace that cannot be read has everything.
+func (s *Server) goneReleases() func(ns, release string) bool {
+	names := map[string]map[string]bool{}
+	return func(ns, release string) bool {
+		have, read := names[ns]
+		if !read {
+			rels, err := s.catalog.releases(ns)
+			if err != nil {
+				names[ns] = nil
+				return false
+			}
+			have = map[string]bool{}
+			for _, r := range rels {
+				have[r.Name] = true
+			}
+			names[ns] = have
+		}
+		return have != nil && !have[release]
+	}
+}
+
+// releaseExists says whether Helm keeps a release by that name; true when
+// it cannot tell.
+func (s *Server) releaseExists(ns, release string) bool {
+	return !s.goneReleases()(ns, release)
 }

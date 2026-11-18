@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -108,5 +109,34 @@ func TestFailureSummary(t *testing.T) {
 	}
 	if got := failureSummary("INSTALLATION FAILED: services \"x\" already exists", time.Minute); got != `services "x" already exists` {
 		t.Errorf("%q", got)
+	}
+}
+
+// Requests for a release no longer in the cluster are not listed; a failure
+// that left nothing behind still is, for its error.
+func TestRemovedReleasesLeaveTheList(t *testing.T) {
+	f := newCatalogFixture(t)
+	now := time.Now()
+	for _, q := range []*helmreq.Request{
+		{ID: "a", Release: "redis", Status: helmreq.StatusInstalled},
+		{ID: "b", Release: "gone", Status: helmreq.StatusInstalled},
+		{ID: "c", Release: "gone", Status: helmreq.StatusFailed},
+		{ID: "d", Release: "never", Status: helmreq.StatusFailed, NothingLeft: true},
+		{ID: "e", Release: "redis", Status: helmreq.StatusFailed, Uninstalled: &now},
+		{ID: "f", Release: "asked", Status: helmreq.StatusWaiting, Expires: now.Add(time.Hour)},
+	} {
+		q.Namespace, q.Requester, q.Created = "payments-dev", "anna", now
+		if err := f.s.catalog.requests.Create(context.Background(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, list := f.callList(t, "anna", "/api/helm/my-requests")
+	var ids []string
+	for _, q := range list {
+		ids = append(ids, q["id"].(string))
+	}
+	sort.Strings(ids)
+	if got := strings.Join(ids, ","); got != "a,d,f" {
+		t.Errorf("listed %s, want a, d and f", got)
 	}
 }
