@@ -33,6 +33,10 @@ type Settings struct {
 	Replicas []string `json:"replicas"`
 	// Defaults are the chart's own values at the paths above, as text.
 	Defaults map[string]string `json:"defaults"`
+	// Components are the parts and features switched on or off.
+	Components []Component `json:"components"`
+	// Parts are the subcharts included, each by what it says it is.
+	Parts map[string]string `json:"parts"`
 }
 
 // IngressSpot is one ingress block in a chart's values.
@@ -59,14 +63,22 @@ var Presets = []string{"nano", "micro", "small", "medium", "large", "xlarge", "2
 
 // Detect finds the settings in a chart's values.
 func Detect(values map[string]any) Settings {
+	return detect(values, true)
+}
+
+// detect finds the settings in values. ownGlobal: a global storage class is
+// the chart's own, and covers its volumes; otherwise it is a subchart's, and
+// the chart's own volumes are named one by one beside it.
+func detect(values map[string]any, ownGlobal bool) Settings {
 	s := Settings{Storage: []string{}, Ingresses: []IngressSpot{}, Presets: []string{}, Disks: []string{},
-		Replicas: []string{}, Defaults: map[string]string{}}
+		Replicas: []string{}, Defaults: map[string]string{}, Components: []Component{}, Parts: map[string]string{}}
+	var global []string
 	if g, ok := values["global"].(map[string]any); ok {
 		for _, k := range []string{"defaultStorageClass", "storageClass"} {
 			if _, ok := g[k]; ok {
 				// Bitnami's global applies to every volume of the chart and
 				// its subcharts: one setting is enough.
-				s.Storage = append(s.Storage, "global."+k)
+				global = append(global, "global."+k)
 				break
 			}
 		}
@@ -115,6 +127,10 @@ func Detect(values map[string]any) Settings {
 			if !ok {
 				continue
 			}
+			if on, isSwitch := sub["enabled"].(bool); isSwitch && !on && k != "ingress" {
+				// Switched off: its volumes and sizes are not asked about.
+				continue
+			}
 			if k == "ingress" {
 				if spot, ok := ingressSpot(path, sub); ok {
 					s.Ingresses = append(s.Ingresses, spot)
@@ -143,7 +159,12 @@ func Detect(values map[string]any) Settings {
 		}
 	}
 	walk("", values, 1)
-	if len(s.Storage) == 0 {
+	switch {
+	case len(global) > 0 && ownGlobal:
+		s.Storage = global
+	case len(global) > 0:
+		s.Storage = append(global, local...)
+	default:
 		s.Storage = append(s.Storage, local...)
 	}
 	sort.Strings(s.Storage)
@@ -263,6 +284,8 @@ type Fill struct {
 	// Disk is a volume size, e.g. 20Gi, for every path in DiskPaths.
 	Disk      string   `json:"disk"`
 	DiskPaths []string `json:"diskPaths"`
+	// DiskSizes are sizes volume by volume; an empty one leaves the chart's.
+	DiskSizes map[string]string `json:"diskSizes"`
 	// Replicas are pod counts by path.
 	Replicas map[string]int `json:"replicas"`
 	// Set are values typed for keys the chart asked for, each written as
@@ -329,6 +352,15 @@ func (f Fill) assignments() (map[string]assign, error) {
 		for _, p := range f.DiskPaths {
 			out[p] = assign{f.Disk, noteDisk}
 		}
+	}
+	for p, size := range f.DiskSizes {
+		if size = strings.TrimSpace(size); size == "" {
+			continue
+		}
+		if !diskRE.MatchString(size) {
+			return nil, fmt.Errorf("a disk size is a number with Mi, Gi or Ti, like 20Gi")
+		}
+		out[p] = assign{size, noteDisk}
 	}
 	for p, n := range f.Replicas {
 		if n < 0 || n > 50 {

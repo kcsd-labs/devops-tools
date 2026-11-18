@@ -333,12 +333,10 @@ func (s *Server) handleCatalogChart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := chartInfo{Located: loc, Digest: arc.Digest, Schema: len(arc.Chart.Schema) > 0,
-		Settings: helmcat.Detect(arc.Chart.Values), Docs: map[string]string{}, Examples: map[string]string{}}
+		Settings: helmcat.DetectChart(arc.Chart), Docs: helmcat.ChartDocs(arc.Chart), Examples: helmcat.ChartExamples(arc.Chart)}
 	for _, f := range arc.Chart.Raw {
 		if f.Name == "values.yaml" {
 			info.Defaults = string(f.Data)
-			info.Docs = helmcat.Docs(f.Data)
-			info.Examples = helmcat.Examples(f.Data)
 		}
 	}
 	if t, err := s.catalog.templates.Get(r.Context(), loc.Repo, loc.Name); err == nil {

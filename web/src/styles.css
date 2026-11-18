@@ -3610,3 +3610,58 @@ a.seg-btn {
   font-style: italic;
   white-space: pre-wrap;
 }
+.cat-volumes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cat-volume {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 8px;
+  align-items: center;
+}
+.cat-volume-name {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.cat-part-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-family: inherit;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  vertical-align: middle;
+}
+.cat-parts {
+  margin: 4px 0 14px;
+}
+.cat-parts summary {
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.cat-parts summary .cat-side-title {
+  display: inline;
+}
+.cat-switch {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.cat-switch input {
+  margin-top: 2px;
+}
+.cat-switch.changed .mono {
+  color: var(--accent);
+}
+.cat-switch-about {
+  display: block;
+  color: var(--muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}

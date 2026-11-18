@@ -803,7 +803,8 @@ function InstallForm({
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [extra, setExtra] = useState<Record<string, string>>({});
   const [storage, setStorage] = useState("");
-  const [disk, setDisk] = useState("");
+  const [disks, setDisks] = useState<Record<string, string>>({});
+  const [switches, setSwitches] = useState<Record<string, boolean>>({});
   const [preset, setPreset] = useState("");
   const [replicas, setReplicas] = useState<Record<string, string>>({});
   const [expose, setExpose] = useState(false);
@@ -840,13 +841,19 @@ function InstallForm({
   for (const [k, v] of Object.entries(typed)) if (v.trim()) set[k] = v;
   const more: Record<string, string> = {};
   for (const [k, v] of Object.entries(extra)) if (v.trim() && !set[k]) more[k] = v;
-  const diskOK = /^[0-9]+(\.[0-9]+)?(Mi|Gi|Ti)$/.test(disk);
+  const sizeOK = (v: string) => /^[0-9]+(\.[0-9]+)?(Mi|Gi|Ti)$/.test(v);
+  const diskSizes: Record<string, string> = {};
+  for (const [p, v] of Object.entries(disks)) if (sizeOK(v)) diskSizes[p] = v;
+  // A switch written only when it differs from what the chart ships.
+  for (const c of settings.components ?? []) {
+    const on = switches[c.key];
+    if (on !== undefined && on !== c.on && !more[c.key]) more[c.key] = String(on);
+  }
   const fill: ValuesFill = install
     ? {
         storageClass: storage,
         storagePaths: settings.storage,
-        disk: diskOK ? disk : "",
-        diskPaths: settings.disks,
+        diskSizes,
         preset,
         presetPaths: settings.presets,
         replicas: replicaCounts,
@@ -1029,16 +1036,34 @@ function InstallForm({
           )}
           {settings.disks.length > 0 && (
             <div className="field">
-              <label className="muted" title={settings.disks.join(", ")}>
-                Disk size{settings.disks.length > 1 ? ` · each of ${settings.disks.length} volumes` : ""}
-              </label>
-              <input
-                className="input mono"
-                value={disk}
-                placeholder={settings.defaults[settings.disks[0]] ? `${settings.defaults[settings.disks[0]]} (the chart's)` : "8Gi"}
-                onChange={(e) => setDisk(e.target.value.trim())}
-              />
-              {disk && !diskOK && <div className="field-hint cat-kept">A number with Mi, Gi or Ti, like 20Gi.</div>}
+              <label className="muted">Disk sizes · empty keeps the chart's</label>
+              <div className="cat-volumes">
+                {settings.disks.map((p) => {
+                  const name = volumeName(p);
+                  const part = partOf(name, settings.parts ?? {});
+                  return (
+                    <div className="cat-volume" key={p}>
+                      <span className="mono cat-volume-name" title={p}>
+                        {name}
+                        {part !== undefined && (
+                          <span className="cat-part-pill" title={part}>
+                            built-in
+                          </span>
+                        )}
+                      </span>
+                      <input
+                        className="input mono"
+                        value={disks[p] ?? ""}
+                        placeholder={settings.defaults[p] || "8Gi"}
+                        onChange={(e) => setDisks((d) => ({ ...d, [p]: e.target.value.trim() }))}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {Object.values(disks).some((v) => v && !sizeOK(v)) && (
+                <div className="field-hint cat-kept">A size is a number with Mi, Gi or Ti, like 20Gi.</div>
+              )}
               {handEdited(keptOf(settings.disks))}
             </div>
           )}
@@ -1084,6 +1109,44 @@ function InstallForm({
           </div>
           {handEdited(keptOf(settings.replicas))}
         </div>
+      )}
+
+      {install && (settings.components ?? []).length > 0 && (
+        <details className="cat-parts">
+          <summary>
+            <span className="cat-side-title">Parts and features</span>
+            <span className="muted">
+              {" "}
+              {(settings.components ?? []).filter((c) => switches[c.key] ?? c.on).length} on ·{" "}
+              {(settings.components ?? []).filter((c) => !(switches[c.key] ?? c.on)).length} off
+            </span>
+          </summary>
+          <div className="cat-why">
+            What the chart can run or do, as it ships. A part switched on here starts with the chart's own settings —
+            change them in Values (YAML).
+          </div>
+          {(settings.components ?? []).map((c) => {
+            const on = switches[c.key] ?? c.on;
+            return (
+              <label className={"checkbox cat-switch" + (on !== c.on ? " changed" : "")} key={c.key}>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(e) => setSwitches((sw) => ({ ...sw, [c.key]: e.target.checked }))}
+                />
+                <span>
+                  <span className="mono">{c.key.replace(/\.enabled$/, "")}</span>
+                  {c.part && <span className="cat-part-pill">built-in</span>}
+                  {c.about && (
+                    <span className="cat-switch-about" title={c.about}>
+                      {c.about.length > 140 ? c.about.slice(0, 140) + "…" : c.about}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </details>
       )}
 
       {install && !hasQuestions && asked.length === 0 && (
@@ -1275,6 +1338,18 @@ function ChartNeeds({
       })}
     </div>
   );
+}
+
+/** A volume by the part it belongs to: postgresql.primary for
+    postgresql.primary.persistence.size. */
+function volumeName(path: string): string {
+  return path.replace(/\.(persistence|persistentVolume)\.size$/, "") || path;
+}
+
+/** What a built-in part says it is, when a path is inside one. */
+function partOf(path: string, parts: Record<string, string>): string | undefined {
+  const top = path.split(".")[0];
+  return top in parts ? parts[top] : undefined;
 }
 
 /** Saves text as a file in the browser. */

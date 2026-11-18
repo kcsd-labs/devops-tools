@@ -93,6 +93,10 @@ export interface CatalogSettings {
   replicas: string[];
   /** The chart's own value at each of the paths above. */
   defaults: Record<string, string>;
+  /** Parts and features switched on or off. */
+  components?: { key: string; on: boolean; about: string; part?: boolean }[];
+  /** Built-in parts (subcharts) by what each says it is. */
+  parts?: Record<string, string>;
 }
 
 export interface ClusterHints {
@@ -113,6 +117,8 @@ export interface ValuesFill {
   presetPaths?: string[];
   disk?: string;
   diskPaths?: string[];
+  /** Sizes volume by volume. */
+  diskSizes?: Record<string, string>;
   replicas?: Record<string, number>;
   /** Values typed for keys the chart asked for. */
   set?: Record<string, string>;
