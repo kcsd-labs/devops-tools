@@ -3,6 +3,18 @@
 What changed in each release, in the words of somebody deciding whether to
 upgrade. The release notes on GitHub carry the same text.
 
+## 0.29.0
+
+- INFR-1933 — a Helm Packages page: install charts from Artifact Hub through
+  a simple form — Redis, Keycloak, Temporal or any other package a team needs
+  for development. Developers send a request, an administrator approves it.
+  Installs show their pods and can be stopped; installed releases can be
+  viewed and uninstalled.
+- New permissions per namespace: `helm-install`, `helm-upgrade`. Roles
+  granted `"*"` have them.
+- Turned off with `config.catalog.enabled: false`. Needs
+  `rbac.fullAccess: true` and access to artifacthub.io.
+
 ## 0.28.0
 
 - INFR-2028 — a terminal on the pod page: bash, or sh where there is no bash.
