@@ -246,17 +246,41 @@ jobs:
           done
           ls vex
 
+      # The Scout CLI, pinned and checked, rather than docker/scout-action:
+      # the action downloads its own 190 MB binary from GitHub without a token,
+      # and on shared runners that meets the per-address limit — 0.29.0 went
+      # red on "Unexpected HTTP response: 403" with nothing wrong in Scout.
+      # Fetched here with the job's token, retried, and checked against the
+      # release's checksums. Bump SCOUT_VERSION deliberately.
+      - name: Install the Docker Scout CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCOUT_VERSION: 1.18.3
+        run: |
+          tarball="docker-scout_${SCOUT_VERSION}_linux_amd64.tar.gz"
+          for try in 1 2 3; do
+            gh release download "v${SCOUT_VERSION}" --repo docker/scout-cli --clobber \
+              --pattern "$tarball" --pattern "docker-scout_${SCOUT_VERSION}_checksums.txt" && break
+            [ "$try" = 3 ] && exit 1
+            sleep $((try * 15))
+          done
+          grep " ${tarball}\$" "docker-scout_${SCOUT_VERSION}_checksums.txt" | sha256sum -c -
+          mkdir -p ~/.docker/cli-plugins
+          tar -xzf "$tarball" -C ~/.docker/cli-plugins docker-scout
+          chmod +x ~/.docker/cli-plugins/docker-scout
+          docker scout version
+
+      # Signed in already: docker/login-action above left its credentials in
+      # ~/.docker, where the plugin reads them. quickview after attaching, so
+      # the log ends with what Scout now reports for this image, exceptions
+      # applied. No prefix: the runner has no local copy — buildx pushed without
+      # loading — so it is the registry's image, as with docker/scout-action.
       - name: Attach them to the image
-        uses: docker/scout-action@v1
-        with:
-          # quickview after attaching, so the log ends with what Scout now
-          # reports for this image, exceptions applied.
-          command: attestation-add,quickview
-          # No prefix: that means image://, which every command accepts, and the
-          # runner has no local copy — buildx pushed without loading — so it is
-          # the registry's image either way.
-          image: ${{ env.IMAGE }}:${{ steps.v.outputs.app }}
-          file: vex/GO-2026-5932.vex.json
-          predicate-type: https://openvex.dev/ns/v0.2.0
-          dockerhub-user: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          APP: ${{ steps.v.outputs.app }}
+        run: |
+          for f in vex/*.vex.json; do
+            docker scout attestation add --file "$f" \
+              --predicate-type https://openvex.dev/ns/v0.2.0 "${IMAGE}:${APP}"
+          done
+          docker scout quickview "${IMAGE}:${APP}"
